@@ -1,50 +1,47 @@
-# Welcome to your Expo app 👋
+# Fridge-app 프로젝트 실행 방법
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+이 프로젝트는 **React Native**와 **Expo**를 기반으로 만들어졌습니다.
+아래 가이드를 따라 차근차근 실행해주세요.
 
-## Get started
+---
 
-1. Install dependencies
+### 시작하기 전에 (필수 설치)
+먼저 컴퓨터에 `Node.js`가 설치되어 있어야 합니다.
+(설치되어 있지 않다면 [Node.js 공식 홈페이지](https://nodejs.org/ko/)에서 LTS 버전을 다운로드 받아 설치해 주세요.)
 
-   ```bash
-   npm install
-   ```
+### 1. 프로젝트 설정 (패키지 설치)
+터미널(또는 명령 프롬프트)을 열고, 프로젝트 폴더(`Fridge-app`)로 이동한 뒤 아래 명령어를 입력하세요.
 
-2. Start the app
+\`\`\`bash
+npm install
+\`\`\`
 
-   ```bash
-   npx expo start
-   ```
+### 2. 앱 실행하기
+설치가 끝났다면, 아래 명령어를 입력하여 로컬 서버를 켭니다.
 
-In the output, you'll find options to open the app in a
+\`\`\`bash
+npx expo start
+\`\`\`
+명령어를 치면 터미널 화면에 커다란 **QR 코드**와 함께 여러 가지 영어 메뉴가 나타납니다.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### 3. 내 스마트폰에서 앱 화면 보기 (추천)
 
-## Get a fresh project
+1. 스마트폰 앱스토어(또는 플레이스토어)에서 **'Expo Go'** 앱을 검색해서 설치합니다.
+2. **아이폰(iOS):** 기본 카메라 앱을 켜서 터미널에 뜬 QR 코드를 비추면 나타나는 'Expo Go에서 열기' 알림을 누릅니다.
+3. **안드로이드(Android):** 'Expo Go' 앱을 실행하고, 화면의 `Scan QR code` 버튼을 눌러 터미널의 QR 코드를 스캔합니다.
 
-When you're ready, run:
+> **주의사항:** 컴퓨터와 스마트폰이 같은 와이파이(Wi-Fi)에 연결되어 있어야 정상적으로 작동합니다!
 
-```bash
-npm run reset-project
-```
+---
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 4. 컴퓨터에서 바로 앱 화면 보기 (Web 모드)
+스마트폰 연결 없이, 웹 브라우저에서 빠르고 간편하게 화면을 확인하고 싶을 때 사용하세요.
 
-## Learn more
+1. `npx expo start` 명령어로 서버를 켠 상태에서, 터미널 창을 클릭합니다.
+2. 키보드에서 알파벳 `w` 를 누릅니다.
+3. 잠시 기다리면 기본 웹 브라우저(크롬 등)가 자동으로 열리면서 앱 화면이 나타납니다.
+   
 
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+> **Web 모드 참고사항:** 카메라 촬영이나 스마트폰 고유의 네이티브 기능들은 웹에서 완벽하게 작동하지 않을 수 있습니다. UI 디자인을 확인할 때 주로 사용해 주세요.
