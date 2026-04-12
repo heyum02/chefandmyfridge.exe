@@ -1,21 +1,38 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
+import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 1. 가짜 데이터 (Dummy Data) 만들기
-const DUMMY_INGREDIENTS = [
-  { id: '1', name: '양파', expiryDate: 'D-5', quantity: '2개', icon: '🧅' },
-  { id: '2', name: '우유', expiryDate: 'D-3', quantity: '1팩', icon: '🥛' },
-  { id: '3', name: '소고기 (국거리)', expiryDate: 'D-1', quantity: '300g', icon: '🥩' },
-  { id: '4', name: '계란', expiryDate: 'D-10', quantity: '10알', icon: '🥚' },
-  { id: '5', name: '당근', expiryDate: 'D-7', quantity: '1개', icon: '🥕' },
-  { id: '6', name: '대파', expiryDate: 'D-4', quantity: '1단', icon: '🥬' },
-  { id: '7', name: '두부', expiryDate: 'D-2', quantity: '1모', icon: '🧊' },
-];
+// 💡 1. Zustand 보관함 불러오기 (경로가 스크린 폴더 안이므로 '../store/useFridgeStore' 입니다)
+import { useFridgeStore } from '../store/useFridgeStore';
 
 export default function InventoryScreen() {
   
-  // 2. 리스트의 각 항목을 어떻게 보여줄지 정의하는 함수
+  // 💡 2. 보관함에서 데이터와 기능 꺼내오기
+  const ingredients = useFridgeStore((state) => state.ingredients);
+  const addIngredient = useFridgeStore((state) => state.addIngredient);
+  const removeIngredient = useFridgeStore((state) => state.removeIngredient);
+
+  // 입력창 상태 관리
+  const [inputText, setInputText] = useState('');
+
+  // 💡 3. 추가 버튼 누를 때 실행될 함수
+  const handleAdd = () => {
+    if (inputText.trim() === '') return;
+    
+    // 새 재료 객체 만들기 (아직 상세 입력 기능이 없으니 아이콘과 유통기한은 임시로 넣습니다!)
+    const newItem = {
+      id: Date.now().toString(),
+      name: inputText,
+      expiryDate: 'D-?', 
+      quantity: '1개',
+      icon: '🥬', // 기본 아이콘
+    };
+    
+    addIngredient(newItem);
+    setInputText(''); // 입력창 비우기
+  };
+
+  // 리스트의 각 항목을 어떻게 보여줄지 정의하는 함수
   const renderItem = ({ item }) => (
     <View style={styles.card}>
       <Text style={styles.icon}>{item.icon}</Text>
@@ -30,6 +47,14 @@ export default function InventoryScreen() {
           {item.expiryDate}
         </Text>
       </View>
+
+      {/* 💡 4. 쓰레기통 아이콘(삭제 버튼) 추가 */}
+      <TouchableOpacity 
+        style={styles.deleteBtn} 
+        onPress={() => removeIngredient(item.id)}
+      >
+        <Ionicons name="trash-outline" size={24} color="#ff7675" />
+      </TouchableOpacity>
     </View>
   );
 
@@ -38,24 +63,42 @@ export default function InventoryScreen() {
       {/* 상단 헤더 부분 */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>마이 냉장고 식재료</Text>
-        <TouchableOpacity>
-          <Ionicons name="add-circle" size={30} color="#2ecc71" />
+      </View>
+
+      {/* 💡 5. 재료 추가 입력창 (App.js에서 이사 옴!) */}
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="새로운 재료 입력 (예: 사과)"
+          value={inputText}
+          onChangeText={setInputText}
+          onSubmitEditing={handleAdd} // 엔터(완료) 누르면 추가 함수 실행
+  returnKeyType="done"        // 키보드 엔터키를 '완료' 혹은 '체크' 모양으로 변경
+        />
+        <TouchableOpacity style={styles.addButton} onPress={handleAdd}>
+          <Text style={styles.addButtonText}>추가</Text>
         </TouchableOpacity>
       </View>
 
-      {/* 3. FlatList 컴포넌트 적용 */}
+      {/* FlatList 컴포넌트 적용 */}
       <FlatList
-        data={DUMMY_INGREDIENTS} // 어떤 데이터를 쓸 건지
-        keyExtractor={(item) => item.id} // 각 항목의 고유 키값
-        renderItem={renderItem} // 어떻게 그릴 건지 (위에서 만든 함수)
+        data={ingredients} // 💡 가짜 데이터 대신 Zustand의 진짜 데이터를 바라봅니다!
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
         contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false} // 스크롤바 숨기기
+        showsVerticalScrollIndicator={false}
+        // 💡 데이터가 하나도 없을 때 보여줄 화면
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>냉장고가 텅 비었어요!{'\n'}위에 재료를 추가해보세요.</Text>
+          </View>
+        }
       />
     </View>
   );
 }
 
-// 4. 스타일링
+// 스타일링
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -66,12 +109,41 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    paddingTop: 60, // 아이폰 노치 영역 확보
+    paddingTop: 60, 
     backgroundColor: '#fff',
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  /* 새로 추가된 입력창 스타일 */
+  inputContainer: {
+    flexDirection: 'row',
+    padding: 15,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  input: {
+    flex: 1,
+    backgroundColor: '#f1f2f6',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 10,
+    fontSize: 16,
+    marginRight: 10,
+  },
+  addButton: {
+    backgroundColor: '#2ecc71',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    borderRadius: 10,
+  },
+  addButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   listContainer: {
     padding: 15,
@@ -87,7 +159,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3, // 안드로이드 그림자
+    elevation: 3, 
   },
   icon: {
     fontSize: 35,
@@ -110,15 +182,29 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 10,
     backgroundColor: '#f1f2f6',
+    marginRight: 10, // 삭제 버튼과 간격 벌리기
   },
   date: {
     fontSize: 14,
     fontWeight: 'bold',
     color: '#2c3e50',
   },
-  urgentDate: { // 유통기한 임박(D-1, D-2) 스타일 다르게!
+  urgentDate: { 
     fontSize: 14,
     fontWeight: 'bold',
     color: '#e74c3c', 
+  },
+  deleteBtn: {
+    padding: 5,
+  },
+  emptyContainer: {
+    marginTop: 50,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    lineHeight: 24,
   }
 });
