@@ -3,11 +3,13 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useRef, useState } from 'react';
 import { Alert, Button, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { analyzeIngredients } from '../services/geminiService';
 
 const screenWidth = Dimensions.get('window').width;
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
+  const [isLoading, setIsLoading] = useState(false);
   const [photoUris, setPhotoUris] = useState([]);
   const [isCameraVisible, setIsCameraVisible] = useState(false);
   const cameraRef = useRef(null);
@@ -28,15 +30,15 @@ export default function CameraScreen() {
     if (cameraRef.current) {
       const photo = await cameraRef.current.takePictureAsync();
       setPhotoUris((prev) => [...prev, photo.uri]);
-      setIsCameraVisible(false); 
+      setIsCameraVisible(false);
     }
   };
 
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, 
-      allowsMultipleSelection: true, 
-      selectionLimit: 10, 
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: 10,
       quality: 1,
     });
     if (!result.canceled) {
@@ -49,8 +51,37 @@ export default function CameraScreen() {
     setPhotoUris((prev) => prev.filter((_, index) => index !== indexToRemove));
   };
 
+  const handleAnalyze = async () => {
+    if (photoUris.length === 0) {
+      Alert.alert('사진이 없습니다', '분석할 사진을 최소 1장 이상 추가해주세요.');
+      return;
+    }
+    try {
+      setIsLoading(true);
+      const result = await analyzeIngredients(photoUris);
+
+      const processedData = result.map(item => ({
+        ...item,
+        amount: isNaN(Number(item.amount)) ? item.amount : Number(item.amount)
+      }));
+
+      console.log('분석 결과:', processedData);
+      //Alert.alert('분석 완료', '식재료 분석이 완료되었습니다!');
+    } catch (error) {
+      Alert.alert('분석 실패', '식재료 분석 중 오류가 발생했습니다. 다시 시도해주세요.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
   return (
     <View style={styles.container}>
+      {isLoading && (
+        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+          <Text style={{ color: 'white', fontSize: 18, marginTop: 15 }}>식재료 분석 중...</Text>
+        </View>
+      )}
       {/* 💡 1. 새로 추가된 상단 헤더 (카메라 촬영 모드가 아닐 때만 보임) */}
       {!isCameraVisible && (
         <View style={styles.header}>
@@ -94,10 +125,10 @@ export default function CameraScreen() {
                 {photoUris.map((uri, index) => (
                   <View key={index} style={{ width: screenWidth }}>
                     <Image source={{ uri: uri }} style={styles.multiCamera} />
-                    
+
                     {/* 개별 삭제 버튼 유지 */}
-                    <TouchableOpacity 
-                      style={styles.deleteSingleButton} 
+                    <TouchableOpacity
+                      style={styles.deleteSingleButton}
                       onPress={() => removeSinglePhoto(index)}
                     >
                       <Ionicons name="close-circle" size={35} color="rgba(255, 255, 255, 0.8)" />
@@ -110,27 +141,28 @@ export default function CameraScreen() {
                   </View>
                 ))}
               </ScrollView>
-              
+
               {/* 사용자가 마음에 들어했던 기존 하단 버튼 레이아웃 유지 */}
               <View style={styles.actionButtons}>
                 <View style={styles.manageButtons}>
-                    <TouchableOpacity style={styles.addButton} onPress={() => setIsCameraVisible(true)}>
-                      <Ionicons name="camera" size={20} color="white" />
-                      <Text style={styles.addText}>더 찍기</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.addButton, {backgroundColor: '#3498db'}]} onPress={pickImage}>
-                      <Ionicons name="images" size={20} color="white" />
-                      <Text style={styles.addText}>더 고르기</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.addButton, {backgroundColor: '#e74c3c'}]} onPress={() => setPhotoUris([])}>
-                      <Ionicons name="trash-outline" size={20} color="white" />
-                      <Text style={styles.addText}>전체 삭제</Text>
-                    </TouchableOpacity>
+                  <TouchableOpacity style={styles.addButton} onPress={() => setIsCameraVisible(true)}>
+                    <Ionicons name="camera" size={20} color="white" />
+                    <Text style={styles.addText}>더 찍기</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.addButton, { backgroundColor: '#3498db' }]} onPress={pickImage}>
+                    <Ionicons name="images" size={20} color="white" />
+                    <Text style={styles.addText}>더 고르기</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.addButton, { backgroundColor: '#e74c3c' }]} onPress={() => setPhotoUris([])}>
+                    <Ionicons name="trash-outline" size={20} color="white" />
+                    <Text style={styles.addText}>전체 삭제</Text>
+                  </TouchableOpacity>
                 </View>
-                <Button 
-                  title={`이 사진(${photoUris.length}장)으로 식재료 분석하기`} 
-                  color="#2ecc71" 
-                  onPress={() => Alert.alert('9주 차 예고!', `${photoUris.length}장의 사진을 Vision AI 서버로 전송합니다!`)} 
+                <Button
+                  title={`이 사진(${photoUris.length}장)으로 식재료 분석하기`}
+                  color="#2ecc71"
+                  onPress={handleAnalyze}
+                  disabled={isLoading}
                 />
               </View>
             </View>
@@ -143,7 +175,7 @@ export default function CameraScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9f9f9', justifyContent: 'center' },
-  
+
   /* 💡 새로 추가된 헤더 스타일 */
   header: { padding: 20, paddingTop: 60, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
   headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50' },
@@ -156,7 +188,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 20, fontWeight: 'bold', color: '#2c3e50', marginTop: 20 },
   emptySubText: { fontSize: 14, color: '#7f8c8d', marginTop: 10, marginBottom: 30 },
   mainButtons: { gap: 15, width: '80%' },
-  
+
   cameraButtons: { flex: 1, backgroundColor: 'transparent', justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 50 },
   closeButton: { position: 'absolute', top: 50, right: 30 },
   captureButton: { width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(255, 255, 255, 0.5)', justifyContent: 'center', alignItems: 'center' },
@@ -166,7 +198,7 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1 },
   multiCamera: { width: screenWidth, height: '100%', resizeMode: 'cover' },
   deleteSingleButton: { position: 'absolute', top: 50, right: 20, zIndex: 10 },
-  
+
   /* 💡 새로 추가된 사진 번호 뱃지 스타일 */
   pageBadge: { position: 'absolute', bottom: 30, right: 20, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
   pageText: { color: 'white', fontWeight: 'bold', fontSize: 14 },

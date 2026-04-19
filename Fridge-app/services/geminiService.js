@@ -1,5 +1,6 @@
 import axios from 'axios';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+//import { EncodingType } from 'expo-file-system';
 import { SYSTEM_PROMPT } from './prompts';
 
 /**
@@ -14,12 +15,20 @@ const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-
  * @param {string} imageUri - 분석할 이미지의 로컬 경로
  * @returns {Promise<Array>} - 추출된 식재료 객체 배열
  */
-export const analyzeReceipt = async (imageUri) => {
+export const analyzeIngredients = async (imageUris) => {
     try {
         // 1. 이미지를 Base64 문자열로 변환
-        const base64Image = await FileSystem.readAsStringAsync(imageUri, {
-            encoding: FileSystem.EncodingType.Base64,
-        });
+        const imageParts = await Promise.all(imageUris.map(async (uri) => {
+            const base64 = await FileSystem.readAsStringAsync(uri, {
+                encoding: 'base64',
+            });
+            return {
+                inline_data: {
+                    mime_type: "image/jpeg",
+                    data: base64,
+                },
+            };
+        }));
 
         // 2. Gemini API 요청 데이터 구조 설정
         const requestData = {
@@ -29,12 +38,7 @@ export const analyzeReceipt = async (imageUri) => {
             contents: [
                 {
                     parts: [
-                        {
-                            inline_data: {
-                                mime_type: "image/jpeg",
-                                data: base64Image,
-                            },
-                        },
+                        ...imageParts,
                     ],
                 },
             ],
