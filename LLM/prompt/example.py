@@ -77,6 +77,33 @@ def example_3_with_rag_context():
     print(f"응답:\n{response}\n")
 
 
+def example_3_new_recipe_list_rag():
+    """예제 3-1: RAG 기반 레시피 목록 생성"""
+    print("=" * 60)
+    print("예제 3-1: RAG 기반 레시피 목록 생성")
+    print("=" * 60)
+
+    db = RecipeDatabase()
+    rag_context, search_info = db.prepare_rag_context(
+        user_query="간단한 야채 요리",
+        ingredients=["양파", "토마토", "계란"]
+    )
+
+    print(f"검색 정보: {search_info}")
+    print(f"참고 레시피:\n{rag_context}\n")
+
+    user_prompt, system_message = PromptGenerator.recipe_list_rag_prompt(
+        ingredients=["양파", "토마토", "계란"],
+        rag_context=rag_context,
+        allergies=["우유"],
+        cooking_tools=["프라이팬", "냄비"]
+    )
+
+    chat = ChatGPTModule()
+    response = chat.send_prompt(prompt=user_prompt, system_message=system_message)
+    print(f"응답:\n{response}\n")
+
+
 def example_4_nutrition_analysis():
     """예제 4: 영양 분석"""
     print("=" * 60)
@@ -143,6 +170,34 @@ def example_7_prompt_builder():
         .add_format_instruction("list")
         .build())
     
+    chat = ChatGPTModule()
+    response = chat.send_prompt(prompt=user_prompt, system_message=system_message)
+    print(f"응답:\n{response}\n")
+
+
+def example_7_1_recipe_detail_substitution_nutrition():
+    """예제 7-1: 레시피 상세 대체 재료 + 영양 분석"""
+    print("=" * 60)
+    print("예제 7-1: 레시피 상세 대체 재료 + 영양 분석")
+    print("=" * 60)
+
+    user_prompt, system_message = PromptGenerator.recipe_detail_substitution_nutrition_prompt(
+        recipe_name="토마토 계란볶음",
+        recipe_description="간단한 한식 반찬으로, 토마토와 계란을 활용한 볶음 요리입니다.",
+        recipe_ingredients=["계란 2개", "토마토 1개", "양파 1/2개", "참기름 1큰술", "소금"],
+        recipe_steps=[
+            "양파를 썰고 토마토를 깍둑썰기 합니다.",
+            "달군 팬에 기름을 두르고 양파를 볶습니다.",
+            "토마토와 계란을 넣고 함께 볶습니다.",
+            "소금으로 간을 맞추고 참기름을 넣습니다."
+        ],
+        fridge_ingredients=["계란", "양파", "식용유", "소금"],
+        substitution_candidates={
+            "토마토": ["파프리카", "케첩"],
+            "참기름": ["식용유", "들기름"]
+        }
+    )
+
     chat = ChatGPTModule()
     response = chat.send_prompt(prompt=user_prompt, system_message=system_message)
     print(f"응답:\n{response}\n")
@@ -240,10 +295,12 @@ if __name__ == "__main__":
         example_1_basic_chat()
         example_2_recipe_suggestion()
         example_3_with_rag_context()
+        example_3_new_recipe_list_rag()
         example_4_nutrition_analysis()
         example_5_cooking_time()
         example_6_ingredient_substitution()
         example_7_prompt_builder()
+        example_7_1_recipe_detail_substitution_nutrition()
         example_9_rag_enhanced()
         example_10_conversation_history()
     except Exception as e:

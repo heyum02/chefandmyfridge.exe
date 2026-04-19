@@ -107,6 +107,80 @@ class PromptGenerator:
         return user_prompt, system_message
     
     @staticmethod
+    def recipe_list_rag_prompt(
+        ingredients: List[str],
+        rag_context: str,
+        allergies: Optional[List[str]] = None,
+        cooking_tools: Optional[List[str]] = None
+    ) -> Tuple[str, str]:
+        """RAG 검색 결과를 기반으로 만들 수 있는 레시피 목록을 요청하는 프롬프트"""
+        system_message = """당신은 사용자에게 현재 보유 재료로 만들 수 있는 레시피 목록을 추천하는 요리 전문가입니다.
+제공된 RAG 레시피 데이터를 우선적으로 활용하고, 목록에 없는 레시피는 추천하지 마세요."""
+
+        user_parts = [f"내가 가진 재료: {', '.join(ingredients)}"]
+
+        if allergies:
+            user_parts.append(f"알레르기: {', '.join(allergies)}")
+
+        if cooking_tools:
+            user_parts.append(f"사용 가능한 조리 도구: {', '.join(cooking_tools)}")
+
+        user_parts.append("\n아래는 RAG에서 검색된 레시피 후보 목록입니다:")
+        user_parts.append(rag_context)
+        user_parts.append(
+            "\n이 중에서 내가 가진 재료로 만들 수 있는 레시피를 5개 이하로 추천하고, "
+            "각 레시피에 대해 부족한 재료와 예상 조리 시간을 간단히 알려줘."
+        )
+        user_parts.append(
+            "응답은 JSON 형식으로 출력하되, 레시피 이름과 사용 가능한 재료, 부족한 재료, 간단한 설명을 포함해주세요."
+        )
+
+        user_prompt = "\n".join(user_parts)
+        return user_prompt, system_message
+    
+    @staticmethod
+    def recipe_detail_substitution_nutrition_prompt(
+        recipe_name: str,
+        recipe_ingredients: List[str],
+        recipe_steps: Optional[List[str]],
+        fridge_ingredients: List[str],
+        substitution_candidates: dict,
+        recipe_description: Optional[str] = None
+    ) -> Tuple[str, str]:
+        """선택한 레시피의 부족 재료 대체 및 영양 분석을 요청하는 프롬프트"""
+        system_message = """당신은 요리 전문가이자 영양사입니다.
+선택한 레시피의 부족한 재료에 대해 대체 재료를 제안하고, 해당 레시피의 영양 정보를 분석해줍니다."""
+
+        user_parts = [f"레시피 이름: {recipe_name}"]
+        if recipe_description:
+            user_parts.append(f"레시피 설명: {recipe_description}")
+
+        user_parts.append(f"레시피 재료: {', '.join(recipe_ingredients)}")
+        if recipe_steps:
+            user_parts.append("조리 단계:")
+            for idx, step in enumerate(recipe_steps[:5], 1):
+                user_parts.append(f"  {idx}. {step}")
+
+        user_parts.append(f"\n보유 재료: {', '.join(fridge_ingredients)}")
+
+        if substitution_candidates:
+            sub_lines = ["대체 후보:"]
+            for original, candidates in substitution_candidates.items():
+                sub_lines.append(f"  - {original}: {', '.join(candidates)}")
+            user_parts.append("\n".join(sub_lines))
+
+        user_parts.append(
+            "\n이 레시피에서 현재 없는 재료를 대체할 수 있는 재료를 제안하고, 각각의 장단점을 설명해줘. "
+            "또한 전체 레시피에 대한 영양 정보(칼로리, 단백질, 탄수화물, 지방)와 간단한 건강 코멘트를 제공해줘."
+        )
+        user_parts.append(
+            "응답은 JSON 형식으로 출력하되, 'substitutions'와 'nutrition' 항목을 포함해주세요."
+        )
+
+        user_prompt = "\n".join(user_parts)
+        return user_prompt, system_message
+    
+    @staticmethod
     def rag_enhanced_prompt(
         user_query: str,
         rag_context: str,
