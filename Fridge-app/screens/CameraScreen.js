@@ -2,8 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useRef, useState } from 'react';
-import { Alert, Button, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Button, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { analyzeIngredients } from '../services/geminiService';
+import { useFridgeStore } from '../store/useFridgeStore';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -13,6 +14,7 @@ export default function CameraScreen() {
   const [photoUris, setPhotoUris] = useState([]);
   const [isCameraVisible, setIsCameraVisible] = useState(false);
   const cameraRef = useRef(null);
+  const addIngredient = useFridgeStore((state) => state.addIngredient);
 
   if (!permission) return <View />;
   if (!permission.granted) {
@@ -65,8 +67,41 @@ export default function CameraScreen() {
         amount: isNaN(Number(item.amount)) ? item.amount : Number(item.amount)
       }));
 
-      console.log('분석 결과:', processedData);
-      //Alert.alert('분석 완료', '식재료 분석이 완료되었습니다!');
+      // 팝업 및 연동 로직
+      if (processedData && processedData.length > 0) {
+        // [과자] 1개, [배추김치] 0.5포기 처럼 예쁜 텍스트 리스트 만들기
+        const itemListText = processedData.map(item => `[${item.name}] ${item.amount}${item.unit}`).join('\n');
+
+        Alert.alert(
+          '분석 완료! 📸',
+          `냉장고 보관함에 다음 식재료를 추가할까요?\n\n${itemListText}`,
+          [
+            { text: '다시 찍기', style: 'cancel' },
+            {
+              text: '추가하기',
+              onPress: () => {
+                // '추가하기' 누르면 하나씩 보관함으로 전송
+                processedData.forEach(item => {
+                  addIngredient({
+                    id: Date.now().toString() + Math.random().toString(), // 임시 고유 ID
+                    name: item.name,
+                    amount: item.amount,
+                    unit: item.unit,
+                    icon: '📦', // 임시 아이콘
+                  });
+                });
+                
+                // 완료 팝업 & 사진첩 초기화
+                Alert.alert('저장 완료!', '재고관리 창에서 식재료를 확인해 보세요. 🎉', [
+                  { text: '확인', onPress: () => setPhotoUris([]) }
+                ]);
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('분석 실패', '식재료를 인식하지 못했습니다. 다시 촬영해 주세요.');
+      }
     } catch (error) {
       Alert.alert('분석 실패', '식재료 분석 중 오류가 발생했습니다. 다시 시도해주세요.');
     } finally {
@@ -74,12 +109,14 @@ export default function CameraScreen() {
     }
   };
 
-
   return (
     <View style={styles.container}>
+      {/* 수정된 로딩 화면 (빙글빙글 아이콘 추가!) */}
       {isLoading && (
-        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
-          <Text style={{ color: 'white', fontSize: 18, marginTop: 15 }}>식재료 분석 중...</Text>
+        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+          {/* 💡 바로 이 부분에 로딩 아이콘이 들어갑니다 */}
+          <ActivityIndicator size="large" color="#2ecc71" /> 
+          <Text style={{ color: 'white', fontSize: 18, marginTop: 15, fontWeight: 'bold' }}>식재료 분석 중...</Text>
         </View>
       )}
       {/* 💡 1. 새로 추가된 상단 헤더 (카메라 촬영 모드가 아닐 때만 보임) */}
