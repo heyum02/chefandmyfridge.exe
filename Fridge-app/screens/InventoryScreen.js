@@ -2,12 +2,25 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 💡 1. Zustand 보관함 불러오기 (경로가 스크린 폴더 안이므로 '../store/useFridgeStore' 입니다)
+// Zustand 보관함 불러오기 (경로가 스크린 폴더 안이므로 '../store/useFridgeStore' 입니다)
 import { useFridgeStore } from '../store/useFridgeStore';
+
+// 카테고리 이름에 맞춰서 알맞은 아이콘(이모지)을 뱉어내는 함수
+const getCategoryIcon = (category) => {
+  switch (category) {
+    case '신선식품': return '🥬'; 
+    case '냉동식품': return '🧊'; 
+    case '가공식품': return '🍪'; 
+    case '음료수': return '🥤'; 
+    case '소스': return '🥫'; 
+    case '기타': return '📦'; 
+    default: return '📦'; 
+  }
+};
 
 export default function InventoryScreen() {
   
-  // 💡 2. 보관함에서 데이터와 기능 꺼내오기
+  //  보관함에서 데이터와 기능 꺼내오기
   const ingredients = useFridgeStore((state) => state.ingredients);
   const addIngredient = useFridgeStore((state) => state.addIngredient);
   const removeIngredient = useFridgeStore((state) => state.removeIngredient);
@@ -15,17 +28,17 @@ export default function InventoryScreen() {
   // 입력창 상태 관리
   const [inputText, setInputText] = useState('');
 
-  // 💡 3. 추가 버튼 누를 때 실행될 함수
+  //  추가 버튼 누를 때 실행될 함수
   const handleAdd = () => {
     if (inputText.trim() === '') return;
     
-    // 새 재료 객체 만들기 (아직 상세 입력 기능이 없으니 아이콘과 유통기한은 임시로 넣습니다!)
+    // 새 재료 객체 만들기 (아직 상세 입력 기능이 없으니 유통기한은 임시로 넣고, 제미나이 데이터 형식과 맞춥니다!)
     const newItem = {
       id: Date.now().toString(),
       name: inputText,
-      expiryDate: 'D-?', 
-      quantity: '1개',
-      icon: '🥬', // 기본 아이콘
+      amount: 1,         // quantity 대신 amount 사용
+      unit: '개',        // 단위 추가
+      category: '기타',  // 직접 추가하는 건 일단 '기타'로 분류
     };
     
     addIngredient(newItem);
@@ -35,20 +48,20 @@ export default function InventoryScreen() {
   // 리스트의 각 항목을 어떻게 보여줄지 정의하는 함수
   const renderItem = ({ item }) => (
     <View style={styles.card}>
-      <Text style={styles.icon}>{item.icon}</Text>
+      {/* 고정된 아이콘 대신 카테고리에 맞는 아이콘을 띄워줍니다 */}
+      <Text style={styles.icon}>{getCategoryIcon(item.category)}</Text>
       
       <View style={styles.infoContainer}>
         <Text style={styles.name}>{item.name}</Text>
-        <Text style={styles.quantity}>{item.quantity}</Text>
       </View>
       
       <View style={styles.badge}>
-        <Text style={item.expiryDate === 'D-1' || item.expiryDate === 'D-2' ? styles.urgentDate : styles.date}>
-          {item.expiryDate}
+        <Text style={styles.badgeText}>
+          {item.amount} {item.unit}
         </Text>
       </View>
 
-      {/* 💡 4. 쓰레기통 아이콘(삭제 버튼) 추가 */}
+      {/* 쓰레기통 아이콘(삭제 버튼) 추가 */}
       <TouchableOpacity 
         style={styles.deleteBtn} 
         onPress={() => removeIngredient(item.id)}
@@ -65,7 +78,7 @@ export default function InventoryScreen() {
         <Text style={styles.headerTitle}>마이 냉장고 식재료</Text>
       </View>
 
-      {/* 💡 5. 재료 추가 입력창 (App.js에서 이사 옴!) */}
+      {/* 재료 추가 입력창 */}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
@@ -73,7 +86,7 @@ export default function InventoryScreen() {
           value={inputText}
           onChangeText={setInputText}
           onSubmitEditing={handleAdd} // 엔터(완료) 누르면 추가 함수 실행
-  returnKeyType="done"        // 키보드 엔터키를 '완료' 혹은 '체크' 모양으로 변경
+          returnKeyType="done"        // 키보드 엔터키를 '완료' 혹은 '체크' 모양으로 변경
         />
         <TouchableOpacity style={styles.addButton} onPress={handleAdd}>
           <Text style={styles.addButtonText}>추가</Text>
@@ -100,111 +113,24 @@ export default function InventoryScreen() {
 
 // 스타일링
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f6fa',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 60, 
-    backgroundColor: '#fff',
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  /* 새로 추가된 입력창 스타일 */
-  inputContainer: {
-    flexDirection: 'row',
-    padding: 15,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  input: {
-    flex: 1,
-    backgroundColor: '#f1f2f6',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 10,
-    fontSize: 16,
-    marginRight: 10,
-  },
-  addButton: {
-    backgroundColor: '#2ecc71',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    borderRadius: 10,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  listContainer: {
-    padding: 15,
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 15,
-    borderRadius: 15,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3, 
-  },
-  icon: {
-    fontSize: 35,
-    marginRight: 15,
-  },
-  infoContainer: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  quantity: {
-    fontSize: 14,
-    color: '#7f8c8d',
-  },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-    backgroundColor: '#f1f2f6',
-    marginRight: 10, // 삭제 버튼과 간격 벌리기
-  },
-  date: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  urgentDate: { 
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#e74c3c', 
-  },
-  deleteBtn: {
-    padding: 5,
-  },
-  emptyContainer: {
-    marginTop: 50,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#7f8c8d',
-    textAlign: 'center',
-    lineHeight: 24,
-  }
+  container: { flex: 1, backgroundColor: '#f5f6fa' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 60, backgroundColor: '#fff' },
+  headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50' },
+  inputContainer: { flexDirection: 'row', padding: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
+  input: { flex: 1, backgroundColor: '#f1f2f6', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 10, fontSize: 16, marginRight: 10 },
+  addButton: { backgroundColor: '#2ecc71', justifyContent: 'center', paddingHorizontal: 20, borderRadius: 10 },
+  addButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  listContainer: { padding: 15 },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 15, borderRadius: 15, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  icon: { fontSize: 35, marginRight: 15 },
+  infoContainer: { flex: 1 },
+  
+  name: { fontSize: 18, fontWeight: '600' }, // 수량이 옆으로 빠졌으니 하단 여백(marginBottom) 제거
+  
+  badge: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#f1f2f6', marginRight: 10 },
+  badgeText: { fontSize: 15, fontWeight: 'bold', color: '#2c3e50' },
+  
+  deleteBtn: { padding: 5 },
+  emptyContainer: { marginTop: 50, alignItems: 'center' },
+  emptyText: { fontSize: 16, color: '#7f8c8d', textAlign: 'center', lineHeight: 24 }
 });
