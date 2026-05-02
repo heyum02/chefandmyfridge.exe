@@ -1,252 +1,249 @@
 """
 프롬프트 생성 모듈
-사용자 입력과 RAG 컨텍스트를 기반으로 ChatGPT에 전달할 프롬프트 생성
+RAG 기반 레시피 추천 및 상세 조리 프롬프트만 제공합니다.
 """
 
-from typing import Optional, List, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+
+@dataclass
+class RecipeRecommendationRequest:
+    """레시피 추천 프롬프트 입력"""
+
+    ingredients: List[str]
+    rag_context: str
+    allergies: List[str] = field(default_factory=list)
+    cooking_tools: List[str] = field(default_factory=list)
+    cooking_history: List[str] = field(default_factory=list)
+    max_results: int = 5
+
+
+@dataclass
+class RecipeDetailRequest:
+    """레시피 상세 프롬프트 입력"""
+
+    recipe_name: str
+    rag_context: str
+    available_ingredients: List[str]
+    substitution_context: Optional[str] = None
+    missing_ingredients: List[str] = field(default_factory=list)
+    allergies: List[str] = field(default_factory=list)
+    selected_tools: List[str] = field(default_factory=list)
+    cooking_history: List[str] = field(default_factory=list)
+    nutrition_focus: Optional[Dict[str, str]] = None
 
 
 class PromptGenerator:
-    """프롬프트 생성용 정적 메서드 모음"""
-    
+    """레시피 추천/상세 안내 프롬프트 생성기"""
+
     @staticmethod
-    def recipe_suggestion_prompt(
-        ingredients: List[str],
-        allergies: Optional[List[str]] = None,
-        cooking_tools: Optional[List[str]] = None,
-        rag_context: Optional[str] = None
+    def rag_recipe_recommendation_prompt(
+        request: RecipeRecommendationRequest,
     ) -> Tuple[str, str]:
         """
-        보유 재료를 기반으로 레시피 추천 프롬프트 생성
-        
+        현재 보유 재료, 알레르기, 조리 도구, 사용자 요리 기록을 반영해
+        RAG 레시피 후보 중 추천 목록을 생성하는 프롬프트
+
+        요구사항:
+        - recipes_dedup.json 기반 RAG 결과만 사용
+        - 최대 2개 재료 부족까지 허용
+        - 요리 난이도와 예상 조리 시간 포함
+
         Returns:
             (user_prompt, system_message) 튜플
         """
-        system_message = """당신은 친절한 요리 조언가입니다.
-사용자가 보유한 재료를 기반으로 맛있는 레시피를 추천해줍니다.
-한국 요리를 중심으로 추천하며, 제공된 레시피 정보가 있으면 참고합니다."""
+        ingredients = request.ingredients
+        rag_context = request.rag_context
+        allergies = request.allergies
+        cooking_tools = request.cooking_tools
+        cooking_history = request.cooking_history
+        max_results = request.max_results
 
-        user_parts = [f"내가 가진 재료: {', '.join(ingredients)}"]
-        
-        if allergies:
-            user_parts.append(f"알레르기: {', '.join(allergies)}")
-        
-        if cooking_tools:
-            user_parts.append(f"사용 가능한 조리 도구: {', '.join(cooking_tools)}")
-        
-        if rag_context:
-            user_parts.append(f"\n참고할 레시피 정보:\n{rag_context}")
-        
-        user_parts.append("\n이 재료들로 만들 수 있는 요리를 추천해줘. 조리 방법도 간단히 설명해줄래?")
-        
-        user_prompt = "\n".join(user_parts)
-        
-        return user_prompt, system_message
-    
-    @staticmethod
-    def recipe_extraction_prompt(user_input: str, rag_context: Optional[str] = None) -> Tuple[str, str]:
-        """
-        사용자의 자연어 요청에서 레시피를 추출하는 프롬프트
-        
-        Returns:
-            (user_prompt, system_message) 튜플
-        """
-        system_message = """당신은 요리 정보 추출 전문가입니다.
-사용자의 요청을 분석하여 필요한 재료, 조리 방법, 팁 등을 정리해줍니다.
-제공된 레시피 정보가 있으면 참고합니다."""
+        system_message = """당신은 RAG 기반 레시피 추천 전문가입니다.
+반드시 제공된 RAG 컨텍스트(원본: LLM/recipe/data/recipes_dedup.json 검색 결과) 안에서만 레시피를 추천하세요.
+컨텍스트에 없는 요리는 절대 새로 만들어 추천하지 마세요.
 
-        user_parts = [user_input]
-        
-        if rag_context:
-            user_parts.append(f"\n참고: {rag_context}")
-        
-        user_prompt = "\n".join(user_parts)
-        
-        return user_prompt, system_message
-    
-    @staticmethod
-    def nutrition_analysis_prompt(dish_name: str, ingredients: List[str]) -> Tuple[str, str]:
-        """영양 분석 프롬프트"""
-        system_message = "당신은 영양사입니다. 요리의 영양 정보를 분석해줍니다."
-        
-        user_prompt = f"""요리명: {dish_name}
-재료: {', '.join(ingredients)}
+추천 규칙:
+1. 사용자의 현재 보유 재료를 최우선으로 반영합니다.
+2. 레시피에 필요한 재료 중 최대 2개까지는 없어도 추천 가능합니다.
+3. 알레르기 유발 재료가 포함된 레시피는 제외합니다.
+4. 사용 가능한 조리 도구로 만들기 어려운 레시피는 우선순위를 낮추거나 제외합니다.
+5. 사용자의 이전 요리 기록을 참고해 너무 비슷한 요리만 반복 추천하지 말고 적절히 다양성을 반영합니다.
+6. 난이도와 예상 조리 시간을 반드시 포함합니다.
 
-이 요리의 대략적인 영양 정보(칼로리, 단백질, 탄수화물, 지방, 비타민)를 분석해줄래?"""
-        
-        return user_prompt, system_message
-    
-    @staticmethod
-    def cooking_time_estimation_prompt(
-        ingredients: List[str],
-        difficulty: str = "중간"
-    ) -> Tuple[str, str]:
-        """조리 시간 예측 프롬프트"""
-        system_message = "당신은 요리 경험이 풍부합니다. 조리 시간을 정확히 예측해줍니다."
-        
-        user_prompt = f"""재료: {', '.join(ingredients)}
-난이도: {difficulty}
+응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
 
-이 재료로 밥을 만든다면 예상 조리 시간은? 준비 시간과 조리 시간을 나누어 설명해줘."""
-        
-        return user_prompt, system_message
-    
-    @staticmethod
-    def ingredient_substitution_prompt(
-        original_ingredient: str,
-        reason: str = "보유하지 않음"
-    ) -> Tuple[str, str]:
-        """재료 대체 프롬프트"""
-        system_message = "당신은 요리 전문가입니다. 재료를 효과적으로 대체하는 방법을 제시해줍니다."
-        
-        user_prompt = f"""원래 재료: {original_ingredient}
-이유: {reason}
-
-이 재료를 대체할 수 있는 재료들을 3가지 제시해주고, 각각의 장단점을 설명해줄래?"""
-        
-        return user_prompt, system_message
-    
-    @staticmethod
-    def recipe_list_rag_prompt(
-        ingredients: List[str],
-        rag_context: str,
-        allergies: Optional[List[str]] = None,
-        cooking_tools: Optional[List[str]] = None
-    ) -> Tuple[str, str]:
-        """RAG 검색 결과를 기반으로 만들 수 있는 레시피 목록을 요청하는 프롬프트"""
-        system_message = """당신은 사용자에게 현재 보유 재료로 만들 수 있는 레시피 목록을 추천하는 요리 전문가입니다.
-제공된 RAG 레시피 데이터를 우선적으로 활용하고, 목록에 없는 레시피는 추천하지 마세요."""
-
-        user_parts = [f"내가 가진 재료: {', '.join(ingredients)}"]
+        user_parts = [
+            "다음 조건을 바탕으로 RAG 레시피 후보에서 만들 수 있는 요리 목록을 추천해줘.",
+            f"현재 보유 재료: {', '.join(ingredients)}",
+            f"최대 추천 개수: {max_results}",
+            "부족한 재료는 레시피당 최대 2개까지 허용",
+        ]
 
         if allergies:
-            user_parts.append(f"알레르기: {', '.join(allergies)}")
+            user_parts.append(f"사용자 알레르기 정보: {', '.join(allergies)}")
 
         if cooking_tools:
             user_parts.append(f"사용 가능한 조리 도구: {', '.join(cooking_tools)}")
 
-        user_parts.append("\n아래는 RAG에서 검색된 레시피 후보 목록입니다:")
+        if cooking_history:
+            user_parts.append(f"이전 사용자 요리 기록: {', '.join(cooking_history)}")
+
+        user_parts.append("\nRAG 레시피 후보:")
         user_parts.append(rag_context)
         user_parts.append(
-            "\n이 중에서 내가 가진 재료로 만들 수 있는 레시피를 5개 이하로 추천하고, "
-            "각 레시피에 대해 부족한 재료와 예상 조리 시간을 간단히 알려줘."
-        )
-        user_parts.append(
-            "응답은 JSON 형식으로 출력하되, 레시피 이름과 사용 가능한 재료, 부족한 재료, 간단한 설명을 포함해주세요."
-        )
+            """
+반드시 아래 JSON 형식으로만 응답해줘:
+{
+  "recipes": [
+    {
+      "name": "요리명",
+      "difficulty": "쉬움/보통/어려움",
+      "estimated_time_minutes": 20,
+      "available_ingredients": ["가지고 있는 재료1", "가지고 있는 재료2"],
+      "missing_ingredients": ["없는 재료1"],
+      "missing_ingredient_count": 1,
+      "required_tools": ["프라이팬"],
+      "reason": "이 요리를 추천하는 이유"
+    }
+  ]
+}
 
-        user_prompt = "\n".join(user_parts)
-        return user_prompt, system_message
-    
-    @staticmethod
-    def recipe_detail_substitution_nutrition_prompt(
-        recipe_name: str,
-        recipe_ingredients: List[str],
-        recipe_steps: Optional[List[str]],
-        fridge_ingredients: List[str],
-        substitution_candidates: dict,
-        recipe_description: Optional[str] = None
-    ) -> Tuple[str, str]:
-        """선택한 레시피의 부족 재료 대체 및 영양 분석을 요청하는 프롬프트"""
-        system_message = """당신은 요리 전문가이자 영양사입니다.
-선택한 레시피의 부족한 재료에 대해 대체 재료를 제안하고, 해당 레시피의 영양 정보를 분석해줍니다."""
-
-        user_parts = [f"레시피 이름: {recipe_name}"]
-        if recipe_description:
-            user_parts.append(f"레시피 설명: {recipe_description}")
-
-        user_parts.append(f"레시피 재료: {', '.join(recipe_ingredients)}")
-        if recipe_steps:
-            user_parts.append("조리 단계:")
-            for idx, step in enumerate(recipe_steps[:5], 1):
-                user_parts.append(f"  {idx}. {step}")
-
-        user_parts.append(f"\n보유 재료: {', '.join(fridge_ingredients)}")
-
-        if substitution_candidates:
-            sub_lines = ["대체 후보:"]
-            for original, candidates in substitution_candidates.items():
-                sub_lines.append(f"  - {original}: {', '.join(candidates)}")
-            user_parts.append("\n".join(sub_lines))
-
-        user_parts.append(
-            "\n이 레시피에서 현재 없는 재료를 대체할 수 있는 재료를 제안하고, 각각의 장단점을 설명해줘. "
-            "또한 전체 레시피에 대한 영양 정보(칼로리, 단백질, 탄수화물, 지방)와 간단한 건강 코멘트를 제공해줘."
-        )
-        user_parts.append(
-            "응답은 JSON 형식으로 출력하되, 'substitutions'와 'nutrition' 항목을 포함해주세요."
+중요:
+- missing_ingredient_count는 반드시 숫자로 작성
+- missing_ingredients는 최대 2개까지만 포함
+- recipes 배열은 추천 우선순위 순서대로 정렬
+- 조건에 맞는 요리가 없으면 {"recipes": []} 로 응답
+""".strip()
         )
 
         user_prompt = "\n".join(user_parts)
         return user_prompt, system_message
-    
+
     @staticmethod
-    def rag_enhanced_prompt(
-        user_query: str,
-        rag_context: str,
-        system_message: Optional[str] = None
+    def rag_recipe_detail_with_substitution_prompt(
+        request: RecipeDetailRequest,
     ) -> Tuple[str, str]:
         """
-        RAG 컨텍스트를 포함한 프롬프트
-        
-        Args:
-            user_query: 사용자 질문
-            rag_context: RAG로 검색한 레시피 정보
-            system_message: 커스텀 시스템 메시지 (선택)
-        
+        선택된 레시피의 조리법, 부족한 재료 대체안, 영양 정보를 생성하는 프롬프트
+
+        요구사항:
+        - 선택된 요리의 상세 조리법 출력
+        - 없는 재료가 있으면 substitution_network.json 기반 대체 재료 추천
+        - 이전 사용자 요리 기록과 피드백을 반영한 입맛 조정
+        - 실제 사용 재료를 기준으로 영양성분 출력
+
         Returns:
             (user_prompt, system_message) 튜플
         """
-        if not system_message:
-            system_message = """당신은 요리 전문가입니다.
-제공된 레시피 정보를 참고하여 사용자의 요청에 정확히 답변합니다.
-레시피 정보가 있으면 우선적으로 활용합니다."""
-        
-        user_prompt = f"""{user_query}
+        recipe_name = request.recipe_name
+        rag_context = request.rag_context
+        available_ingredients = request.available_ingredients
+        substitution_context = request.substitution_context
+        missing_ingredients = request.missing_ingredients
+        allergies = request.allergies
+        selected_tools = request.selected_tools
+        cooking_history = request.cooking_history
+        nutrition_focus = request.nutrition_focus
 
-참고할 레시피:
-{rag_context}"""
-        
+        system_message = """당신은 레시피 설명 전문가이자 영양 분석가입니다.
+반드시 제공된 RAG 컨텍스트(레시피 정보)와 대체재 컨텍스트(원본: recipe/data/substitution_network.json 검색 결과)를 우선 사용하세요.
+컨텍스트에 없는 정보는 필요할 때만 매우 제한적으로 추론하고, 추론한 경우에도 과장하지 마세요.
+
+작업 규칙:
+1. 선택된 레시피 1개만 설명합니다.
+2. 없는 재료가 있으면 대체 가능한 재료를 우선 제안합니다.
+3. 알레르기와 충돌하는 대체재는 추천하지 않습니다.
+4. 이전 사용자의 요리 기록과 맛 관련 피드백을 참고해 간, 매운맛, 단맛, 기름진 정도를 조절합니다.
+5. 예를 들어 "너무 짜다"는 의견이 많으면 양념/소금/간장 양을 줄이고, "너무 맵다"는 의견이 많으면 고추류/매운 양념을 줄이는 식으로 반영합니다.
+6. 조리법은 대체 재료와 사용자 입맛 조정이 반영된 최종 버전으로 정리합니다.
+7. 영양 정보는 최종적으로 사용되는 재료 기준으로 요약합니다.
+
+응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
+
+        user_parts = [
+            f"선택한 요리: {recipe_name}",
+            f"현재 보유 재료: {', '.join(available_ingredients)}",
+            "\n선택된 레시피 RAG 정보:",
+            rag_context,
+        ]
+
+        if missing_ingredients:
+            user_parts.append(f"현재 없는 재료: {', '.join(missing_ingredients)}")
+
+        if allergies:
+            user_parts.append(f"사용자 알레르기 정보: {', '.join(allergies)}")
+
+        if selected_tools:
+            user_parts.append(f"사용 가능한 조리 도구: {', '.join(selected_tools)}")
+
+        if cooking_history:
+            user_parts.append(f"이전 사용자 요리 기록 및 맛 피드백: {', '.join(cooking_history)}")
+
+        if substitution_context:
+            user_parts.append("\n대체 재료 참고 정보:")
+            user_parts.append(substitution_context)
+
+        if nutrition_focus:
+            focus_text = ", ".join(
+                f"{key}: {value}" for key, value in nutrition_focus.items()
+            )
+            user_parts.append(f"영양 분석 참고 조건: {focus_text}")
+
+        user_parts.append(
+            """
+아래 JSON 형식으로만 응답해줘:
+{
+  "recipe": {
+    "name": "요리명",
+    "summary": "요리 한줄 설명",
+    "difficulty": "쉬움/보통/어려움",
+    "estimated_time_minutes": 20
+  },
+  "ingredients": {
+    "original": ["원래 재료1", "원래 재료2"],
+    "missing": ["없는 재료1"],
+    "substitutions": [
+      {
+        "original_ingredient": "없는 재료1",
+        "substitute": "대체 재료",
+        "reason": "왜 적절한지",
+        "notes": "맛/식감/주의사항"
+      }
+    ],
+    "final_used": ["최종 사용 재료1", "최종 사용 재료2"]
+  },
+  "taste_adjustments": [
+    {
+      "preference_signal": "예: 너무 짜다는 의견이 많음",
+      "adjustment": "예: 소금과 간장 양을 줄임",
+      "applied_to": ["간장", "소금"]
+    }
+  ],
+  "instructions": [
+    "1단계 조리법",
+    "2단계 조리법"
+  ],
+  "nutrition": {
+    "calories_kcal": "예: 420",
+    "carbohydrates_g": "예: 28",
+    "protein_g": "예: 21",
+    "fat_g": "예: 18",
+    "fiber_g": "예: 5",
+    "sodium_mg": "예: 620",
+    "nutrition_comment": "영양 요약 코멘트"
+  }
+}
+
+중요:
+- 없는 재료가 없으면 substitutions는 빈 배열로 출력
+- cooking_history가 있으면 taste_adjustments에 반드시 반영
+- instructions는 실제 최종 사용 재료와 입맛 조정 기준으로 작성
+- nutrition은 final_used 기준으로 계산/추정
+- recipe_name과 일치하는 레시피만 설명
+""".strip()
+        )
+
+        user_prompt = "\n".join(user_parts)
         return user_prompt, system_message
-
-
-class PromptBuilder:
-    """체인 패턴을 사용한 프롬프트 빌더"""
-    
-    def __init__(self, base_prompt: str = "", base_system: str = ""):
-        """
-        Args:
-            base_prompt: 초기 사용자 프롬프트
-            base_system: 초기 시스템 메시지
-        """
-        self.user_prompt = base_prompt
-        self.system_message = base_system
-    
-    def add_instruction(self, instruction: str) -> "PromptBuilder":
-        """지시사항 추가"""
-        self.user_prompt += f"\n\n지시사항: {instruction}"
-        return self
-    
-    def add_context(self, context_title: str, context_content: str) -> "PromptBuilder":
-        """컨텍스트 추가"""
-        self.user_prompt += f"\n\n[{context_title}]\n{context_content}"
-        return self
-    
-    def add_rag_context(self, rag_context: str) -> "PromptBuilder":
-        """RAG 컨텍스트 추가"""
-        self.user_prompt += f"\n\n[참고 레시피]\n{rag_context}"
-        return self
-    
-    def add_format_instruction(self, format_type: str) -> "PromptBuilder":
-        """출력 형식 지시 추가"""
-        if format_type == "json":
-            self.user_prompt += "\n\n응답은 반드시 JSON 형식으로 제시해주세요."
-        elif format_type == "list":
-            self.user_prompt += "\n\n응답은 단계적 리스트 형식으로 제시해주세요."
-        elif format_type == "markdown":
-            self.user_prompt += "\n\n응답은 마크다운 형식으로 제시해주세요."
-        return self
-    
-    def build(self) -> Tuple[str, str]:
-        """프롬프트 빌드 완료, (user_prompt, system_message) 반환"""
-        return self.user_prompt, self.system_message

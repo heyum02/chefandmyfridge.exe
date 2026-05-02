@@ -13,12 +13,12 @@ from difflib import SequenceMatcher
 class RecipeRAG:
     """레시피 데이터베이스를 활용한 RAG 시스템"""
     
-    def __init__(self, recipes_path: str = "../recipe/recipes_pages"):
+    def __init__(self, recipes_path: str = "../recipe/data/recipes_dedup.json"):
         """
         RAG 모듈 초기화
         
         Args:
-            recipes_path: 레시피 JSON 파일들이 있는 경로
+            recipes_path: 레시피 JSON 파일 경로 (단일 파일 또는 폴더)
         """
         self.recipes_path = recipes_path
         self.recipe_cache: Dict[int, Dict] = {}
@@ -36,12 +36,17 @@ class RecipeRAG:
             로드된 레시피 수
         """
         try:
-            recipes_dir = Path(self.recipes_path)
-            if not recipes_dir.exists():
-                print(f"경로가 없습니다: {self.recipes_path}")
-                return 0
+            recipes_path = Path(self.recipes_path)
             
-            json_files = sorted(recipes_dir.glob("*.json"))[:limit]
+            if recipes_path.is_file():
+                # 단일 파일 로드
+                json_files = [recipes_path]
+            elif recipes_path.is_dir():
+                # 폴더에서 JSON 파일들 로드
+                json_files = sorted(recipes_path.glob("*.json"))[:limit]
+            else:
+                print(f"경로가 유효하지 않습니다: {self.recipes_path}")
+                return 0
             
             for file_path in json_files:
                 try:
@@ -227,7 +232,7 @@ class RecipeRAG:
 class RecipeDatabase:
     """레시피 데이터베이스 관리"""
     
-    def __init__(self, recipes_path: str = "../recipe/recipes_pages"):
+    def __init__(self, recipes_path: str = "../recipe/data/recipes_dedup.json"):
         self.recipes_path = recipes_path
         self.rag = RecipeRAG(recipes_path)
     
