@@ -111,10 +111,9 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      {/* 수정된 로딩 화면 (빙글빙글 아이콘 추가!) */}
       {isLoading && (
         <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
-          {/* 💡 바로 이 부분에 로딩 아이콘이 들어갑니다 */}
+          {/* 로딩 아이콘*/}
           <ActivityIndicator size="large" color="#2ecc71" /> 
           <Text style={{ color: 'white', fontSize: 18, marginTop: 15, fontWeight: 'bold' }}>식재료 분석 중...</Text>
         </View>

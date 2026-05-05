@@ -34,7 +34,7 @@ export default function LoginScreen({ onLogin, onGoToSignUp }) {
     <View style={styles.container}>
       {/* 상단 로고 및 타이틀 */}
       <Ionicons name="leaf-outline" size={80} color="#2ecc71" style={{ marginBottom: 20 }} />
-      <Text style={styles.title}>마이 냉장고</Text>
+      <Text style={styles.title}>fridge manager</Text>
 
       {/* 입력창 영역 */}
       <View style={styles.inputBox}>

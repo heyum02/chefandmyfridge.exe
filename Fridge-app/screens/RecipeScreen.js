@@ -10,7 +10,7 @@ export default function RecipeScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   
   // 카테고리 탭 상태 관리
-  const categories = ['✨ 전체 추천', '⏱️ 초스피드', '⏳ 유통기한 임박', '🥗 비건', '🔥 다이어트'];
+  const categories = ['✨ 추천', '⏱️ 초스피드'];
   const [selectedCategory, setSelectedCategory] = useState(categories[0]);
 
   // 💡 1. 냉장고 보관함에서 첫 번째 재료 꺼내오기 (대체 식재료 UI용)
