@@ -141,7 +141,7 @@ export default function RecipeScreen() {
           <View style={styles.modalContent}>
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
               <Text style={styles.modalTitle}>요리는 어떠셨나요? 😋</Text>
-              <Text style={styles.modalSubtitle}>피드백을 통해 AI가 더 똑똑해집니다.</Text>
+              <Text style={styles.modalSubtitle}>피드백을 통해 AI가 더 똑똑해집니다</Text>
               
               <View style={styles.ratingSection}>
                 {[1, 2, 3, 4, 5].map((star) => (
@@ -151,7 +151,7 @@ export default function RecipeScreen() {
                 ))}
               </View>
 
-              <TextInput style={styles.commentInput} placeholder="코멘트 남기기 (대체 재료 때문에 아쉬웠나요?)" value={comment} onChangeText={setComment} maxLength={30} />
+              <TextInput style={styles.commentInput} placeholder="간단한 코멘트 남기기 (밥도둑이다 !)" value={comment} onChangeText={setComment} maxLength={30} />
               
               <View style={styles.divider} />
               <View style={styles.feedbackSection}>
@@ -173,7 +173,7 @@ export default function RecipeScreen() {
               
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%' }}>
                 <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={styles.closeBtnText}>나중에 할게요</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.submitBtn} onPress={() => saveRecipeRecord(true)}><Text style={styles.submitBtnText}>완벽하게 반영하기 ✨</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.submitBtn} onPress={() => saveRecipeRecord(true)}><Text style={styles.submitBtnText}>입맛 반영하기 ✨</Text></TouchableOpacity>
               </View>
             </View>
 
