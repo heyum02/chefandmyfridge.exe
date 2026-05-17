@@ -4,23 +4,25 @@ RAG (Retrieval Augmented Generation) 모듈
 """
 
 import json
-import os
 from pathlib import Path
 from typing import List, Dict, Tuple
-from difflib import SequenceMatcher
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_RECIPES_PATH = BASE_DIR.parent / "recipe" / "data" / "recipes_dedup.json"
 
 
 class RecipeRAG:
     """레시피 데이터베이스를 활용한 RAG 시스템"""
     
-    def __init__(self, recipes_path: str = "../recipe/data/recipes_dedup.json"):
+    def __init__(self, recipes_path: str = None):
         """
         RAG 모듈 초기화
         
         Args:
             recipes_path: 레시피 JSON 파일 경로 (단일 파일 또는 폴더)
         """
-        self.recipes_path = recipes_path
+        self.recipes_path = Path(recipes_path) if recipes_path else DEFAULT_RECIPES_PATH
         self.recipe_cache: Dict[int, Dict] = {}
         self.recipe_index: List[Dict] = []
         self.loaded = False
@@ -36,7 +38,9 @@ class RecipeRAG:
             로드된 레시피 수
         """
         try:
-            recipes_path = Path(self.recipes_path)
+            recipes_path = self.recipes_path
+            if not recipes_path.is_absolute():
+                recipes_path = (BASE_DIR / recipes_path).resolve()
             
             if recipes_path.is_file():
                 # 단일 파일 로드
@@ -45,7 +49,7 @@ class RecipeRAG:
                 # 폴더에서 JSON 파일들 로드
                 json_files = sorted(recipes_path.glob("*.json"))[:limit]
             else:
-                print(f"경로가 유효하지 않습니다: {self.recipes_path}")
+                print(f"경로가 유효하지 않습니다: {recipes_path}")
                 return 0
             
             for file_path in json_files:
@@ -67,7 +71,7 @@ class RecipeRAG:
                                 self.recipe_index.append(index_entry)
                 except json.JSONDecodeError:
                     continue
-                except Exception as e:
+                except Exception:
                     continue
             
             self.loaded = True
@@ -232,8 +236,8 @@ class RecipeRAG:
 class RecipeDatabase:
     """레시피 데이터베이스 관리"""
     
-    def __init__(self, recipes_path: str = "../recipe/data/recipes_dedup.json"):
-        self.recipes_path = recipes_path
+    def __init__(self, recipes_path: str = None):
+        self.recipes_path = Path(recipes_path) if recipes_path else DEFAULT_RECIPES_PATH
         self.rag = RecipeRAG(recipes_path)
     
     def prepare_rag_context(self, user_query: str, ingredients: List[str] = None) -> Tuple[str, str]:

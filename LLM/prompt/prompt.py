@@ -31,11 +31,42 @@ class RecipeDetailRequest:
     allergies: List[str] = field(default_factory=list)
     selected_tools: List[str] = field(default_factory=list)
     cooking_history: List[str] = field(default_factory=list)
+    conversation_history: List[Dict[str, str]] = field(default_factory=list)
     nutrition_focus: Optional[Dict[str, str]] = None
+
+
+@dataclass
+class RecipeFollowUpRequest:
+    """레시피 상세 응답 이후 추가 질문 프롬프트 입력"""
+
+    recipe_name: str
+    previous_recipe_response: str
+    user_followup_question: str
+    rag_context: Optional[str] = None
+    substitution_context: Optional[str] = None
+    available_ingredients: List[str] = field(default_factory=list)
+    allergies: List[str] = field(default_factory=list)
+    selected_tools: List[str] = field(default_factory=list)
+    cooking_history: List[str] = field(default_factory=list)
+    conversation_history: List[Dict[str, str]] = field(default_factory=list)
 
 
 class PromptGenerator:
     """레시피 추천/상세 안내 프롬프트 생성기"""
+
+    @staticmethod
+    def _format_conversation_history(conversation_history: List[Dict[str, str]]) -> str:
+        """대화 히스토리를 프롬프트용 문자열로 변환"""
+        if not conversation_history:
+            return ""
+
+        history_lines = ["이전 대화 히스토리:"]
+        for idx, message in enumerate(conversation_history, 1):
+            role = message.get("role", "unknown")
+            content = message.get("content", "")
+            history_lines.append(f"{idx}. [{role}] {content}")
+
+        return "\n".join(history_lines)
 
     @staticmethod
     def rag_recipe_recommendation_prompt(
@@ -122,6 +153,111 @@ class PromptGenerator:
         return user_prompt, system_message
 
     @staticmethod
+    def rag_recipe_followup_prompt(
+        request: RecipeFollowUpRequest,
+    ) -> Tuple[str, str]:
+        """
+        레시피 상세 응답 이후 사용자의 추가 질문에 답변하기 위한 프롬프트
+
+        요구사항:
+        - 직전 상세 레시피 응답을 기준으로 맥락 유지
+        - 가능하면 기존 RAG/대체재 컨텍스트 우선 활용
+        - 사용자 제약(재료, 알레르기, 도구, 입맛)을 계속 반영
+
+        Returns:
+            (user_prompt, system_message) 튜플
+        """
+        system_message = """당신은 이전에 레시피 상세 안내를 제공한 요리 전문가입니다.
+반드시 직전 레시피 상세 응답과 제공된 RAG 컨텍스트를 우선 참고해, 같은 레시피 맥락을 유지하며 추가 질문에 답하세요.
+새로운 레시피를 제안하지 말고, 사용자가 선택한 같은 요리를 기준으로 설명하세요.
+
+응답 규칙:
+1. 사용자의 추가 질문에 직접적으로 답합니다.
+2. 이전에 제안한 대체재, 입맛 조정, 영양 정보와 충돌하지 않게 답합니다.
+3. 사용 가능한 재료, 알레르기, 조리 도구, 이전 피드백을 계속 반영합니다.
+4. RAG 컨텍스트에 근거가 있으면 그것을 우선 사용하고, 부족한 경우에만 제한적으로 추론합니다.
+5. 추가 질문이 조리법 변경을 요구하면 변경된 부분이 무엇인지 분명히 설명합니다.
+6. 이전 대화 히스토리가 있으면 그 안의 최근 합의사항과 제약을 계속 유지합니다.
+
+응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
+
+        user_parts = [
+            f"선택한 요리: {request.recipe_name}",
+            f"사용자 추가 질문: {request.user_followup_question}",
+            "\n직전 레시피 상세 응답:",
+            request.previous_recipe_response,
+        ]
+
+        if request.rag_context:
+            user_parts.append("\n레시피 RAG 정보:")
+            user_parts.append(request.rag_context)
+
+        if request.substitution_context:
+            user_parts.append("\n대체 재료 참고 정보:")
+            user_parts.append(request.substitution_context)
+
+        if request.available_ingredients:
+            user_parts.append(
+                f"현재 보유 재료: {', '.join(request.available_ingredients)}"
+            )
+
+        if request.allergies:
+            user_parts.append(f"사용자 알레르기 정보: {', '.join(request.allergies)}")
+
+        if request.selected_tools:
+            user_parts.append(
+                f"사용 가능한 조리 도구: {', '.join(request.selected_tools)}"
+            )
+
+        if request.cooking_history:
+            user_parts.append(
+                f"이전 사용자 요리 기록 및 맛 피드백: {', '.join(request.cooking_history)}"
+            )
+
+        if request.conversation_history:
+            user_parts.append(
+                "\n" + PromptGenerator._format_conversation_history(
+                    request.conversation_history
+                )
+            )
+
+        user_parts.append(
+            """
+아래 JSON 형식으로만 응답해줘:
+{
+  "recipe_name": "요리명",
+  "followup_question": "사용자 추가 질문",
+  "answer_summary": "질문에 대한 핵심 답변 요약",
+  "changes": [
+    {
+      "category": "ingredient/tool/step/taste/nutrition/time",
+      "before": "기존 내용",
+      "after": "변경된 내용",
+      "reason": "변경 이유"
+    }
+  ],
+  "updated_instructions": [
+    "필요 시 갱신된 1단계",
+    "필요 시 갱신된 2단계"
+  ],
+  "tips": [
+    "추가 팁 1",
+    "추가 팁 2"
+  ]
+}
+
+중요:
+- 추가 질문이 조리법 수정과 무관하면 updated_instructions는 빈 배열로 출력
+- 변경점이 없으면 changes는 빈 배열로 출력
+- 항상 같은 recipe_name 맥락을 유지
+- conversation_history가 있으면 가장 최근 합의사항을 우선 반영
+""".strip()
+        )
+
+        user_prompt = "\n".join(user_parts)
+        return user_prompt, system_message
+
+    @staticmethod
     def rag_recipe_detail_with_substitution_prompt(
         request: RecipeDetailRequest,
     ) -> Tuple[str, str]:
@@ -145,6 +281,7 @@ class PromptGenerator:
         allergies = request.allergies
         selected_tools = request.selected_tools
         cooking_history = request.cooking_history
+        conversation_history = request.conversation_history
         nutrition_focus = request.nutrition_focus
 
         system_message = """당신은 레시피 설명 전문가이자 영양 분석가입니다.
@@ -159,6 +296,7 @@ class PromptGenerator:
 5. 예를 들어 "너무 짜다"는 의견이 많으면 양념/소금/간장 양을 줄이고, "너무 맵다"는 의견이 많으면 고추류/매운 양념을 줄이는 식으로 반영합니다.
 6. 조리법은 대체 재료와 사용자 입맛 조정이 반영된 최종 버전으로 정리합니다.
 7. 영양 정보는 최종적으로 사용되는 재료 기준으로 요약합니다.
+8. 이전 대화 히스토리가 있으면, 이미 논의된 선호도와 제약을 유지해 같은 맥락으로 설명합니다.
 
 응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
 
@@ -180,6 +318,11 @@ class PromptGenerator:
 
         if cooking_history:
             user_parts.append(f"이전 사용자 요리 기록 및 맛 피드백: {', '.join(cooking_history)}")
+
+        if conversation_history:
+            user_parts.append(
+                "\n" + PromptGenerator._format_conversation_history(conversation_history)
+            )
 
         if substitution_context:
             user_parts.append("\n대체 재료 참고 정보:")
@@ -239,6 +382,7 @@ class PromptGenerator:
 중요:
 - 없는 재료가 없으면 substitutions는 빈 배열로 출력
 - cooking_history가 있으면 taste_adjustments에 반드시 반영
+- conversation_history가 있으면 이전 대화 맥락과 충돌하지 않게 반영
 - instructions는 실제 최종 사용 재료와 입맛 조정 기준으로 작성
 - nutrition은 final_used 기준으로 계산/추정
 - recipe_name과 일치하는 레시피만 설명
