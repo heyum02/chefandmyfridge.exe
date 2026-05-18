@@ -1,6 +1,5 @@
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system/legacy';
-//import { EncodingType } from 'expo-file-system';
 import { SYSTEM_PROMPT } from './prompts';
 
 /**
@@ -19,7 +18,9 @@ export const analyzeIngredients = async (imageUris) => {
     try {
         // 1. 이미지를 Base64 문자열로 변환
         const imageParts = await Promise.all(imageUris.map(async (uri) => {
-            const base64 = await FileSystem.readAsStringAsync(uri, {
+
+            const cleanPath = uri.startsWith('file://') ? uri : `file://${uri}`;
+            const base64 = await FileSystem.readAsStringAsync(cleanPath, {
                 encoding: 'base64',
             });
             return {

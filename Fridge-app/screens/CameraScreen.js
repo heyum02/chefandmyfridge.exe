@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Button, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { analyzeIngredients } from '../services/geminiService';
 import { useFridgeStore } from '../store/useFridgeStore';
+import { preprocessImage } from '../services/imagePreprocess';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -60,7 +61,29 @@ export default function CameraScreen() {
     }
     try {
       setIsLoading(true);
-      const result = await analyzeIngredients(photoUris);
+
+      // 전처리 테스트용 시간 측정 시작 - 배포시 삭제
+      // 콘솔 로그도 배포시 삭제 예정.
+      const startTime = Date.now();
+
+      console.log('--- 이미지 전처리 시작 ---');
+      const preprocessedUris = await Promise.all(photoUris.map(async (uri) => {
+        const optimizedUri = await preprocessImage(uri);
+        return optimizedUri;
+      }));
+      console.log('--- 이미지 전처리 완료 ---');
+
+      //전처리 적용
+      const result = await analyzeIngredients(preprocessedUris);
+
+      // 전처리 미적용 - 비교 테스트용.
+      //const result = await analyzeIngredients(photoUris);
+
+      // 테스트용 시간 측정 완료 - 배포시 삭제
+      const endTime = Date.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+      console.log(`Gemini 분석 시간: ${duration} 초`);
 
       const processedData = result.map(item => ({
         ...item,
@@ -90,7 +113,7 @@ export default function CameraScreen() {
                     icon: '📦', // 임시 아이콘
                   });
                 });
-                
+
                 // 완료 팝업 & 사진첩 초기화
                 Alert.alert('저장 완료!', '재고관리 창에서 식재료를 확인해 보세요. 🎉', [
                   { text: '확인', onPress: () => setPhotoUris([]) }
@@ -115,7 +138,7 @@ export default function CameraScreen() {
       {isLoading && (
         <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
           {/* 💡 바로 이 부분에 로딩 아이콘이 들어갑니다 */}
-          <ActivityIndicator size="large" color="#2ecc71" /> 
+          <ActivityIndicator size="large" color="#2ecc71" />
           <Text style={{ color: 'white', fontSize: 18, marginTop: 15, fontWeight: 'bold' }}>식재료 분석 중...</Text>
         </View>
       )}
