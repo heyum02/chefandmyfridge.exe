@@ -1,27 +1,22 @@
-import { useState, useRef } from 'react';
-import { StyleSheet, Text, View, Button, Image, TouchableOpacity, ScrollView, Dimensions, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { Ionicons } from '@expo/vector-icons'; // 아이콘 추가
+import { useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Button, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { analyzeIngredients } from '../services/geminiService';
+import { useFridgeStore } from '../store/useFridgeStore';
 
-// 스마트폰 화면의 너비를 가져옵니다 (사진을 꽉 차게 보여주기 위함)
 const screenWidth = Dimensions.get('window').width;
 
 export default function CameraScreen() {
-  // 1. 카메라 권한 상태 관리
   const [permission, requestPermission] = useCameraPermissions();
-  // 2. 촬영된 사진의 URI를 저장할 상태
-  //단일 URI가 아닌, 여러 URI를 담을 배열([])로 상태를 변경합니다.
+  const [isLoading, setIsLoading] = useState(false);
   const [photoUris, setPhotoUris] = useState([]);
-  // 📸 카메라 뷰를 띄울지 여부를 결정하는 상태 (처음에는 숨김)
   const [isCameraVisible, setIsCameraVisible] = useState(false);
-  // 3. 카메라 컴포넌트를 참조하기 위한 Ref
   const cameraRef = useRef(null);
+  const addIngredient = useFridgeStore((state) => state.addIngredient);
 
-  // 권한 로딩 중일 때 빈 화면 반환
   if (!permission) return <View />;
-  
-  // 권한이 거부되었거나 아직 묻지 않은 경우
   if (!permission.granted) {
     return (
       <View style={styles.container}>
@@ -33,44 +28,112 @@ export default function CameraScreen() {
     );
   }
 
-  // 📸 카메라로 촬영 후 사진 추가
   const takePicture = async () => {
     if (cameraRef.current) {
       const photo = await cameraRef.current.takePictureAsync();
-      // 기존 사진 배열(prev) 뒤에 새 사진(photo.uri)을 추가합니다.
       setPhotoUris((prev) => [...prev, photo.uri]);
-      setIsCameraVisible(false); // 촬영 후 카메라 닫기
+      setIsCameraVisible(false);
     }
   };
 
-  // 🖼️ 갤러리에서 여러 장 선택 후 사진 추가
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, 
-      allowsMultipleSelection: true, // 다중 선택 활성화
-      selectionLimit: 10, // 최대 10장까지 선택 제한
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: 10,
       quality: 1,
     });
-
-    // 사용자가 사진 선택을 취소하지 않았다면, 해당 사진의 경로를 저장합니다.
     if (!result.canceled) {
-      // 기존 사진 배열(prev) 뒤에 새로 선택한 사진들(selectedUris)을 추가합니다.
-      setPhotoUris((prev) => [...prev, ...photoUris]);
+      setPhotoUris((prev) => [...prev, ...result.assets.map(asset => asset.uri)]);
     }
   };
 
-return (
+  // 특정 사진만 지우는 함수 (유지)
+  const removeSinglePhoto = (indexToRemove) => {
+    setPhotoUris((prev) => prev.filter((_, index) => index !== indexToRemove));
+  };
+
+  const handleAnalyze = async () => {
+    if (photoUris.length === 0) {
+      Alert.alert('사진이 없습니다', '분석할 사진을 최소 1장 이상 추가해주세요.');
+      return;
+    }
+    try {
+      setIsLoading(true);
+      const result = await analyzeIngredients(photoUris);
+
+      const processedData = result.map(item => ({
+        ...item,
+        amount: isNaN(Number(item.amount)) ? item.amount : Number(item.amount)
+      }));
+
+      // 팝업 및 연동 로직
+      if (processedData && processedData.length > 0) {
+        // [과자] 1개, [배추김치] 0.5포기 처럼 예쁜 텍스트 리스트 만들기
+        const itemListText = processedData.map(item => `[${item.name}] ${item.amount}${item.unit}`).join('\n');
+
+        Alert.alert(
+          '분석 완료! 📸',
+          `냉장고 보관함에 다음 식재료를 추가할까요?\n\n${itemListText}`,
+          [
+            { text: '다시 찍기', style: 'cancel' },
+            {
+              text: '추가하기',
+              onPress: () => {
+                // '추가하기' 누르면 하나씩 보관함으로 전송
+                processedData.forEach(item => {
+                  addIngredient({
+                    id: Date.now().toString() + Math.random().toString(), // 임시 고유 ID
+                    name: item.name,
+                    amount: item.amount,
+                    unit: item.unit,
+                    icon: '📦', // 임시 아이콘
+                  });
+                });
+                
+                // 완료 팝업 & 사진첩 초기화
+                Alert.alert('저장 완료!', '재고관리 창에서 식재료를 확인해 보세요. 🎉', [
+                  { text: '확인', onPress: () => setPhotoUris([]) }
+                ]);
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('분석 실패', '식재료를 인식하지 못했습니다. 다시 촬영해 주세요.');
+      }
+    } catch (error) {
+      Alert.alert('분석 실패', '식재료 분석 중 오류가 발생했습니다. 다시 시도해주세요.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
     <View style={styles.container}>
-      {/* 📸 카메라 뷰 (isCameraVisible이 true일 때만 전체화면으로 띄움) */}
+      {/* 수정된 로딩 화면 (빙글빙글 아이콘 추가!) */}
+      {isLoading && (
+        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+          {/* 💡 바로 이 부분에 로딩 아이콘이 들어갑니다 */}
+          <ActivityIndicator size="large" color="#2ecc71" /> 
+          <Text style={{ color: 'white', fontSize: 18, marginTop: 15, fontWeight: 'bold' }}>식재료 분석 중...</Text>
+        </View>
+      )}
+      {/* 💡 1. 새로 추가된 상단 헤더 (카메라 촬영 모드가 아닐 때만 보임) */}
+      {!isCameraVisible && (
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>식재료 촬영</Text>
+        </View>
+      )}
+
+      {/* 📸 카메라 뷰 */}
       {isCameraVisible && (
         <View style={StyleSheet.absoluteFill}>
           <CameraView style={styles.camera} facing="back" ref={cameraRef}>
             <View style={styles.cameraButtons}>
-              {/* 카메라 닫기 버튼 */}
               <TouchableOpacity style={styles.closeButton} onPress={() => setIsCameraVisible(false)}>
                 <Ionicons name="close-circle" size={40} color="white" />
               </TouchableOpacity>
-              {/* 촬영 버튼 */}
               <TouchableOpacity style={styles.captureButton} onPress={takePicture}>
                 <View style={styles.captureButtonInner} />
               </TouchableOpacity>
@@ -79,10 +142,10 @@ return (
         </View>
       )}
 
-      {/* 🖼️ 미리보기 및 사진 관리 화면 (isCameraVisible이 false일 때 보임) */}
+      {/* 🖼️ 미리보기 및 사진 관리 화면 (사용자가 좋아했던 기존 레이아웃 유지) */}
       {!isCameraVisible && (
-        <>
-          {/* 사진이 없는 경우 초기 화면 */}
+        <View style={styles.previewWrapper}>
+          {/* 💡 헤더 아래 영역을 채워주기 위해 별도 스타일(previewWrapper) 적용 */}
           {photoUris.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Ionicons name="camera-outline" size={80} color="#bdc3c7" />
@@ -94,41 +157,54 @@ return (
               </View>
             </View>
           ) : (
-            /* 사진이 1장이라도 있는 경우 미리보기 스와이프 화면 */
             <View style={styles.previewContainer}>
               <ScrollView horizontal pagingEnabled style={styles.scrollView}>
                 {photoUris.map((uri, index) => (
-                  <Image key={index} source={{ uri: uri }} style={styles.multiCamera} />
+                  <View key={index} style={{ width: screenWidth }}>
+                    <Image source={{ uri: uri }} style={styles.multiCamera} />
+
+                    {/* 개별 삭제 버튼 유지 */}
+                    <TouchableOpacity
+                      style={styles.deleteSingleButton}
+                      onPress={() => removeSinglePhoto(index)}
+                    >
+                      <Ionicons name="close-circle" size={35} color="rgba(255, 255, 255, 0.8)" />
+                    </TouchableOpacity>
+
+                    {/* 💡 2. 새로 추가된 사진 번호 뱃지 (우측 하단) */}
+                    <View style={styles.pageBadge}>
+                      <Text style={styles.pageText}>{index + 1} / {photoUris.length}</Text>
+                    </View>
+                  </View>
                 ))}
               </ScrollView>
-              
-              {/* 하단 사진 관리 및 분석 버튼 */}
+
+              {/* 사용자가 마음에 들어했던 기존 하단 버튼 레이아웃 유지 */}
               <View style={styles.actionButtons}>
                 <View style={styles.manageButtons}>
-                    {/* 👉 '사진 더 추가하기' 버튼! */}
-                    <TouchableOpacity style={styles.addButton} onPress={() => setIsCameraVisible(true)}>
-                      <Ionicons name="camera" size={20} color="white" />
-                      <Text style={styles.addText}>더 찍기</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.addButton, {backgroundColor: '#3498db'}]} onPress={pickImage}>
-                      <Ionicons name="images" size={20} color="white" />
-                      <Text style={styles.addText}>더 고르기</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.addButton, {backgroundColor: '#e74c3c'}]} onPress={() => setPhotoUris([])}>
-                      <Ionicons name="trash-outline" size={20} color="white" />
-                      <Text style={styles.addText}>전체 삭제</Text>
-                    </TouchableOpacity>
+                  <TouchableOpacity style={styles.addButton} onPress={() => setIsCameraVisible(true)}>
+                    <Ionicons name="camera" size={20} color="white" />
+                    <Text style={styles.addText}>더 찍기</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.addButton, { backgroundColor: '#3498db' }]} onPress={pickImage}>
+                    <Ionicons name="images" size={20} color="white" />
+                    <Text style={styles.addText}>더 고르기</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.addButton, { backgroundColor: '#e74c3c' }]} onPress={() => setPhotoUris([])}>
+                    <Ionicons name="trash-outline" size={20} color="white" />
+                    <Text style={styles.addText}>전체 삭제</Text>
+                  </TouchableOpacity>
                 </View>
-                
-                <Button 
-                  title={`이 사진(${photoUris.length}장)으로 식재료 분석하기`} 
-                  color="#2ecc71" 
-                  onPress={() => Alert.alert('9주 차 예고!', `${photoUris.length}장의 사진을 Vision AI 서버로 전송하여 한꺼번에 분석합니다!`)} 
+                <Button
+                  title={`이 사진(${photoUris.length}장)으로 식재료 분석하기`}
+                  color="#2ecc71"
+                  onPress={handleAnalyze}
+                  disabled={isLoading}
                 />
               </View>
             </View>
           )}
-        </>
+        </View>
       )}
     </View>
   );
@@ -136,22 +212,34 @@ return (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9f9f9', justifyContent: 'center' },
+
+  /* 💡 새로 추가된 헤더 스타일 */
+  header: { padding: 20, paddingTop: 60, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
+  headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50' },
+
+  /* 💡 인라인 스타일 대신 안전하게 StyleSheet로 뺐습니다 */
+  previewWrapper: { flex: 1 },
+
   camera: { flex: 1 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   emptyText: { fontSize: 20, fontWeight: 'bold', color: '#2c3e50', marginTop: 20 },
   emptySubText: { fontSize: 14, color: '#7f8c8d', marginTop: 10, marginBottom: 30 },
   mainButtons: { gap: 15, width: '80%' },
-  
-  // 카메라 화면 내 버튼
+
   cameraButtons: { flex: 1, backgroundColor: 'transparent', justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 50 },
   closeButton: { position: 'absolute', top: 50, right: 30 },
   captureButton: { width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(255, 255, 255, 0.5)', justifyContent: 'center', alignItems: 'center' },
   captureButtonInner: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'white' },
 
-  // 미리보기 화면
   previewContainer: { flex: 1, backgroundColor: 'black' },
   scrollView: { flex: 1 },
   multiCamera: { width: screenWidth, height: '100%', resizeMode: 'cover' },
+  deleteSingleButton: { position: 'absolute', top: 50, right: 20, zIndex: 10 },
+
+  /* 💡 새로 추가된 사진 번호 뱃지 스타일 */
+  pageBadge: { position: 'absolute', bottom: 30, right: 20, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
+  pageText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+
   actionButtons: { padding: 20, gap: 10, backgroundColor: 'white' },
   manageButtons: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   addButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2ecc71', padding: 10, borderRadius: 5, gap: 5, width: '31%', justifyContent: 'center' },
