@@ -1,136 +1,241 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-
-// Zustand 보관함 불러오기 (경로가 스크린 폴더 안이므로 '../store/useFridgeStore' 입니다)
+import { Alert, FlatList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFridgeStore } from '../store/useFridgeStore';
 
-// 카테고리 이름에 맞춰서 알맞은 아이콘(이모지)을 뱉어내는 함수
 const getCategoryIcon = (category) => {
   switch (category) {
-    case '신선식품': return '🥬'; 
-    case '냉동식품': return '🧊'; 
-    case '가공식품': return '🍪'; 
-    case '음료수': return '🥤'; 
-    case '소스': return '🥫'; 
-    case '기타': return '📦'; 
+    case '채소': return '🥬'; case '과일': return '🍎'; case '육류': return '🥩'; case '수산물': return '🐟';
+    case '유제품/계란': return '🥚'; case '양념/소스': return '🧂'; case '가공/냉동': return '🧊'; case '기타': return '📦';
     default: return '📦'; 
   }
 };
 
+const calculateDday = (dateString) => {
+  if (!dateString) return null;
+  const target = new Date(dateString);
+  const today = new Date();
+  target.setHours(0,0,0,0);
+  today.setHours(0,0,0,0);
+  const diffTime = target - today;
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
+const formatDate = (date) => {
+  const d = new Date(date);
+  let month = '' + (d.getMonth() + 1);
+  let day = '' + d.getDate();
+  const year = d.getFullYear();
+  if (month.length < 2) month = '0' + month;
+  if (day.length < 2) day = '0' + day;
+  return [year, month, day].join('-');
+};
+
 export default function InventoryScreen() {
-  
-  //  보관함에서 데이터와 기능 꺼내오기
   const ingredients = useFridgeStore((state) => state.ingredients);
   const addIngredient = useFridgeStore((state) => state.addIngredient);
   const removeIngredient = useFridgeStore((state) => state.removeIngredient);
+  const updateIngredient = useFridgeStore((state) => state.updateIngredient); 
 
-  // 입력창 상태 관리
+  const [modalVisible, setModalVisible] = useState(false);
   const [inputText, setInputText] = useState('');
+  const [amount, setAmount] = useState(1);
+  const [selectedCategory, setSelectedCategory] = useState('기타'); 
+  const [daysLeft, setDaysLeft] = useState(7); 
 
-  //  추가 버튼 누를 때 실행될 함수
-  const handleAdd = () => {
-    if (inputText.trim() === '') return;
-    
-    // 새 재료 객체 만들기 (아직 상세 입력 기능이 없으니 유통기한은 임시로 넣고, 제미나이 데이터 형식과 맞춥니다!)
-    const newItem = {
-      id: Date.now().toString(),
-      name: inputText,
-      amount: 1,         // quantity 대신 amount 사용
-      unit: '개',        // 단위 추가
-      category: '기타',  // 직접 추가하는 건 일단 '기타'로 분류
-    };
-    
-    addIngredient(newItem);
-    setInputText(''); // 입력창 비우기
+  const [editDdayModal, setEditDdayModal] = useState(false);
+  const [selectedItemForDday, setSelectedItemForDday] = useState(null);
+
+  const categories = ['채소', '과일', '육류', '수산물', '유제품/계란', '양념/소스', '가공/냉동', '기타'];
+
+  // 💡 [절대 방어막] null이거나 id가 없는 유령 데이터는 아예 걸러버립니다!
+  const validIngredients = (ingredients || []).filter(item => item && item.id);
+
+  const sortedIngredients = [...validIngredients].sort((a, b) => {
+    // 💡 optional chaining(?.)으로 한 번 더 방어
+    const dDayA = calculateDday(a?.expiryDate) ?? 999;
+    const dDayB = calculateDday(b?.expiryDate) ?? 999;
+    return dDayA - dDayB;
+  });
+
+  const openAddModal = () => {
+    setInputText(''); setAmount(1); setSelectedCategory('기타'); setDaysLeft(7); setModalVisible(true);
   };
 
-  // 리스트의 각 항목을 어떻게 보여줄지 정의하는 함수
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
-      {/* 고정된 아이콘 대신 카테고리에 맞는 아이콘을 띄워줍니다 */}
-      <Text style={styles.icon}>{getCategoryIcon(item.category)}</Text>
-      
-      <View style={styles.infoContainer}>
-        <Text style={styles.name}>{item.name}</Text>
-      </View>
-      
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>
-          {item.amount} {item.unit}
-        </Text>
-      </View>
+  const handleAmountChange = (value, setter, state) => { setter(state + value); };
 
-      {/* 쓰레기통 아이콘(삭제 버튼) 추가 */}
-      <TouchableOpacity 
-        style={styles.deleteBtn} 
-        onPress={() => removeIngredient(item.id)}
-      >
-        <Ionicons name="trash-outline" size={24} color="#ff7675" />
-      </TouchableOpacity>
-    </View>
-  );
+  const handleAdd = () => {
+    if (inputText.trim() === '') { Alert.alert('알림', '식재료 이름을 입력해주세요!'); return; }
+    const today = new Date();
+    today.setDate(today.getDate() + daysLeft);
+    const newItem = { id: Date.now().toString(), name: inputText, amount: amount, unit: '개', category: selectedCategory, expiryDate: formatDate(today) };
+    addIngredient(newItem);
+    setModalVisible(false); 
+  };
+
+  const renderItem = ({ item }) => {
+    // 💡 화면을 그릴 때도 유령 데이터면 투명 처리
+    if (!item || !item.id) return null; 
+
+    const dDay = calculateDday(item.expiryDate);
+    const isUrgent = dDay !== null && dDay <= 3;
+
+    return (
+      <View style={styles.card}>
+        <Text style={styles.icon}>{getCategoryIcon(item.category)}</Text>
+        <View style={styles.infoContainer}>
+          <Text style={styles.name}>{item.name}</Text>
+          <Text style={styles.categoryText}>{item.category}</Text> 
+        </View>
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{item.amount} {item.unit}</Text>
+        </View>
+        
+        <TouchableOpacity 
+          style={[styles.ddayBadge, isUrgent && styles.ddayBadgeUrgent]}
+          onPress={() => {
+            setSelectedItemForDday(item);
+            setDaysLeft(dDay !== null ? dDay : 7);
+            setEditDdayModal(true);
+          }}
+        >
+          <Text style={[styles.ddayText, isUrgent && styles.ddayTextUrgent]}>
+            {dDay !== null ? (dDay < 0 ? `D+${Math.abs(dDay)}` : dDay === 0 ? 'D-Day' : `D-${dDay}`) : '기한 모름'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.deleteBtn} onPress={() => removeIngredient(item.id)}>
+          <Ionicons name="trash-outline" size={24} color="#ff7675" />
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      {/* 상단 헤더 부분 */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>마이 냉장고 식재료</Text>
-      </View>
-
-      {/* 재료 추가 입력창 */}
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="새로운 재료 입력 (예: 사과)"
-          value={inputText}
-          onChangeText={setInputText}
-          onSubmitEditing={handleAdd} // 엔터(완료) 누르면 추가 함수 실행
-          returnKeyType="done"        // 키보드 엔터키를 '완료' 혹은 '체크' 모양으로 변경
-        />
-        <TouchableOpacity style={styles.addButton} onPress={handleAdd}>
-          <Text style={styles.addButtonText}>추가</Text>
+      <View style={styles.header}><Text style={styles.headerTitle}>마이 냉장고 식재료</Text></View>
+      <View style={styles.topActionContainer}>
+        <TouchableOpacity style={styles.openModalButton} onPress={openAddModal}>
+          <Ionicons name="add-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.openModalButtonText}>직접 식재료 추가하기</Text>
         </TouchableOpacity>
       </View>
 
-      {/* FlatList 컴포넌트 적용 */}
       <FlatList
-        data={ingredients} // 💡 가짜 데이터 대신 Zustand의 진짜 데이터를 바라봅니다!
-        keyExtractor={(item) => item.id}
+        data={sortedIngredients} 
+        // 💡 키(key)를 뽑을 때도 유령 데이터를 대비해 방어
+        keyExtractor={(item, index) => item?.id ? String(item.id) : String(index)}
         renderItem={renderItem}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
-        // 💡 데이터가 하나도 없을 때 보여줄 화면
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>냉장고가 텅 비었어요!{'\n'}위에 재료를 추가해보세요.</Text>
-          </View>
-        }
+        ListEmptyComponent={<View style={styles.emptyContainer}><Text style={styles.emptyText}>냉장고가 텅 비었어요!{'\n'}위에 버튼을 눌러 재료를 추가해보세요.</Text></View>}
       />
+
+      {/* 수기 추가 모달 */}
+      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>식재료 수기 추가</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
+              <Text style={styles.sectionSubtitle}>🏷️ 식재료 이름</Text>
+              <TextInput style={styles.modalInput} placeholder="예: 사과, 대파" value={inputText} onChangeText={setInputText} />
+
+              <Text style={styles.sectionSubtitle}>분류 카테고리</Text>
+              <View style={styles.chipContainer}>
+                {categories.map((cat) => (
+                  <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.activeChip]} onPress={() => setSelectedCategory(cat)}>
+                    <Text style={[styles.chipText, selectedCategory === cat && styles.activeChipText]}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.sectionSubtitle}>🔢 수량 (개)</Text>
+              <View style={styles.amountContainer}>
+                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(-1, setAmount, amount)}><Ionicons name="remove" size={24} color="#2c3e50" /></TouchableOpacity>
+                <Text style={styles.amountText}>{amount}</Text>
+                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(1, setAmount, amount)}><Ionicons name="add" size={24} color="#2c3e50" /></TouchableOpacity>
+              </View>
+
+              <Text style={styles.sectionSubtitle}>⏳ 소비기한 (며칠 남았나요?)</Text>
+              <View style={styles.amountContainer}>
+                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(-1, setDaysLeft, daysLeft)}><Ionicons name="remove" size={24} color="#2c3e50" /></TouchableOpacity>
+                <Text style={styles.amountText}>{daysLeft}일 남음</Text>
+                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(1, setDaysLeft, daysLeft)}><Ionicons name="add" size={24} color="#2c3e50" /></TouchableOpacity>
+              </View>
+            </ScrollView>
+            <View style={styles.modalButtonGroup}>
+              <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={styles.closeBtnText}>취소</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.submitBtn} onPress={handleAdd}><Text style={styles.submitBtnText}>추가하기</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* D-day 수정 모달 */}
+      <Modal animationType="fade" transparent={true} visible={editDdayModal} onRequestClose={() => setEditDdayModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { height: 'auto', paddingBottom: 30 }]}>
+            <Text style={styles.modalTitle}>'{selectedItemForDday?.name}' 소비기한 수정</Text>
+            <Text style={styles.sectionSubtitle}>현재 남은 일수를 조절하세요</Text>
+            <View style={[styles.amountContainer, { alignSelf: 'center', marginBottom: 20 }]}>
+              <TouchableOpacity style={styles.amountBtn} onPress={() => setDaysLeft(daysLeft - 1)}><Ionicons name="remove" size={24} color="#2c3e50" /></TouchableOpacity>
+              <Text style={styles.amountText}>{daysLeft}일 남음</Text>
+              <TouchableOpacity style={styles.amountBtn} onPress={() => setDaysLeft(daysLeft + 1)}><Ionicons name="add" size={24} color="#2c3e50" /></TouchableOpacity>
+            </View>
+            <View style={styles.modalButtonGroup}>
+              <TouchableOpacity style={styles.closeBtn} onPress={() => setEditDdayModal(false)}><Text style={styles.closeBtnText}>취소</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.submitBtn} onPress={() => {
+                const today = new Date();
+                today.setDate(today.getDate() + daysLeft);
+                updateIngredient(selectedItemForDday?.id, { expiryDate: formatDate(today) });
+                setEditDdayModal(false);
+              }}><Text style={styles.submitBtnText}>수정 완료</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-// 스타일링
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f6fa' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 60, backgroundColor: '#fff' },
   headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50' },
-  inputContainer: { flexDirection: 'row', padding: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  input: { flex: 1, backgroundColor: '#f1f2f6', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 10, fontSize: 16, marginRight: 10 },
-  addButton: { backgroundColor: '#2ecc71', justifyContent: 'center', paddingHorizontal: 20, borderRadius: 10 },
-  addButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  topActionContainer: { padding: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
+  openModalButton: { flexDirection: 'row', backgroundColor: '#2ecc71', paddingVertical: 12, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  openModalButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   listContainer: { padding: 15 },
   card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 15, borderRadius: 15, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   icon: { fontSize: 35, marginRight: 15 },
   infoContainer: { flex: 1 },
-  
-  name: { fontSize: 18, fontWeight: '600' }, // 수량이 옆으로 빠졌으니 하단 여백(marginBottom) 제거
-  
+  name: { fontSize: 18, fontWeight: '600', color: '#2c3e50' }, 
+  categoryText: { fontSize: 12, color: '#95a5a6', marginTop: 3 }, 
   badge: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#f1f2f6', marginRight: 10 },
   badgeText: { fontSize: 15, fontWeight: 'bold', color: '#2c3e50' },
-  
+  ddayBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#ecf0f1', marginRight: 10 },
+  ddayText: { fontSize: 13, fontWeight: 'bold', color: '#7f8c8d' },
+  ddayBadgeUrgent: { backgroundColor: '#ffecec' },
+  ddayTextUrgent: { color: '#e74c3c' },
   deleteBtn: { padding: 5 },
   emptyContainer: { marginTop: 50, alignItems: 'center' },
-  emptyText: { fontSize: 16, color: '#7f8c8d', textAlign: 'center', lineHeight: 24 }
+  emptyText: { fontSize: 16, color: '#7f8c8d', textAlign: 'center', lineHeight: 24 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
+  modalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '75%', maxHeight: Platform.OS === 'web' ? 720 : '100%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: Platform.OS === 'web' ? 30 : 0, borderBottomRightRadius: Platform.OS === 'web' ? 30 : 0, padding: 25, alignItems: 'flex-start' },
+  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50', marginBottom: 20, alignSelf: 'center' },
+  sectionSubtitle: { fontSize: 15, fontWeight: 'bold', color: '#34495e', marginTop: 15, marginBottom: 10 },
+  modalInput: { backgroundColor: '#f1f2f6', padding: 15, borderRadius: 10, fontSize: 16, color: '#2c3e50', marginBottom: 10 },
+  chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  chip: { backgroundColor: '#f1f2f6', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, borderColor: '#ecf0f1' },
+  activeChip: { backgroundColor: '#2ecc71', borderColor: '#2ecc71' },
+  chipText: { color: '#7f8c8d', fontSize: 13, fontWeight: '600' },
+  activeChipText: { color: '#fff', fontWeight: 'bold' },
+  amountContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f2f6', alignSelf: 'flex-start', borderRadius: 12, padding: 5 },
+  amountBtn: { backgroundColor: '#fff', padding: 10, borderRadius: 8, elevation: 1, shadowColor: '#000', shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.1, shadowRadius: 2 },
+  amountText: { fontSize: 18, fontWeight: 'bold', paddingHorizontal: 20, color: '#2c3e50' },
+  modalButtonGroup: { flexDirection: 'row', width: '100%', marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderColor: '#eee' },
+  closeBtn: { flex: 0.3, padding: 15, alignItems: 'center' },
+  closeBtnText: { color: '#95a5a6', fontSize: 16, fontWeight: 'bold' },
+  submitBtn: { flex: 0.7, backgroundColor: '#2ecc71', padding: 15, borderRadius: 12, alignItems: 'center' },
+  submitBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
 });
