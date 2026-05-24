@@ -1,36 +1,60 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-
-// 💡 보관함 불러오기 (냉장고 데이터 & 유저 식성 데이터)
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
 export default function RecipeScreen() {
-  const [modalVisible, setModalVisible] = useState(false);
-  
-  // 카테고리 탭 상태 관리
-  const categories = ['✨ 추천', '⏱️ 초스피드'];
-  const [selectedCategory, setSelectedCategory] = useState(categories[0]);
-
-  // 1. 냉장고 보관함에서 첫 번째 재료 꺼내오기 (대체 식재료 UI용)
   const ingredients = useFridgeStore((state) => state.ingredients);
   const firstItem = ingredients.length > 0 ? ingredients[0] : null;
-
-  // 2. 유저 보관함에서 식성 업데이트 및 레시피 저장 함수 꺼내오기
+  
   const updateTaste = useUserStore((state) => state.updateTaste);
-  const addTriedRecipe = useUserStore((state) => state.addTriedRecipe); 
+  const addTriedRecipe = useUserStore((state) => state.addTriedRecipe);
+  
+  const isPremium = useUserStore((state) => state.isPremium);
+  const freeCount = useUserStore((state) => state.freeCount);
+  const setIsPremium = useUserStore((state) => state.setIsPremium);
+  const decreaseFreeCount = useUserStore((state) => state.decreaseFreeCount);
+  const addFreeCount = useUserStore((state) => state.addFreeCount);
 
-  // 💡 3. 모달창 상태 관리 (식성 6단계로 확장, 별점, 코멘트)
+  const categories = ['✨ 추천', '⏱️ 초스피드'];
+  const [selectedCategory, setSelectedCategory] = useState(categories[0]);
+  
+  const [showAdModal, setShowAdModal] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false); 
+  
   const [feedback, setFeedback] = useState({ spicy: 0, salty: 0, sweet: 0, bitter: 0, sour: 0, savory: 0 });
   const [rating, setRating] = useState(0); 
   const [comment, setComment] = useState(''); 
 
-  // 💡 4. '평가 완료하기' 및 '반영 안 함' 버튼 공통 로직
+  const handleGenerateRecipe = () => {
+    if (isPremium) {
+      Alert.alert("레시피 생성 🍳", "프리미엄 회원님, 맞춤 레시피를 분석 중입니다...");
+      return;
+    }
+    if (freeCount > 0) {
+      decreaseFreeCount();
+      Alert.alert("레시피 생성 🍳", `레시피를 생성합니다!\n(남은 무료 횟수: ${freeCount - 1}회)`);
+    } else {
+      setShowAdModal(true); 
+    }
+  };
+
+  const handleWatchAd = () => {
+    setShowAdModal(false);
+    Alert.alert("광고 시청 완료", "보상으로 레시피 1회 이용권이 지급되었습니다!");
+    addFreeCount(1);
+  };
+
+  const handleSubscribe = () => {
+    setShowAdModal(false);
+    setIsPremium(true);
+    Alert.alert("결제 완료 🎉", "프리미엄 회원이 되셨습니다! 무제한으로 이용해 보세요.");
+  };
+
   const saveRecipeRecord = (isReflectTaste) => {
     if (rating === 0) { Alert.alert('알림', '별점을 먼저 선택해 주세요!'); return; }
 
-    // 💡 '반영 안 함'이 아닐 때만 유저 프로필 식성 업데이트
     if (isReflectTaste) {
       if (feedback.spicy !== 0) updateTaste('spicy', feedback.spicy);
       if (feedback.salty !== 0) updateTaste('salty', feedback.salty);
@@ -40,45 +64,27 @@ export default function RecipeScreen() {
       if (feedback.savory !== 0) updateTaste('savory', feedback.savory);
     }
 
-    // 레시피 기록 생성 (현재 날짜 포함)
     const recipeName = firstItem ? `${firstItem.name} 듬뿍 카레` : '고구마 듬뿍 카레';
     const today = new Date();
     const dateString = `${today.getFullYear()}.${today.getMonth() + 1}.${today.getDate()}`; 
     
-    addTriedRecipe({ 
-      id: Date.now().toString(), 
-      name: recipeName, 
-      date: dateString, 
-      rating: rating, 
-      comment: comment 
-    });
+    addTriedRecipe({ id: Date.now().toString(), name: recipeName, date: dateString, rating, comment });
 
-    // 상태 초기화 및 닫기
     setModalVisible(false);
     setFeedback({ spicy: 0, salty: 0, sweet: 0, bitter: 0, sour: 0, savory: 0 });
-    setRating(0); 
-    setComment('');
+    setRating(0); setComment('');
 
-    // 웹과 앱 알림 분리
     const alertMsg = isReflectTaste ? '별점과 피드백이 AI에 완벽하게 반영되었습니다!' : '입맛에는 반영하지 않고 홈 화면 기록에만 저장했습니다.';
-    if (Platform.OS === 'web') {
-      window.alert(`저장 완료 🍽️\n${alertMsg}`);
-    } else {
-      Alert.alert('저장 완료 🍽️', alertMsg);
-    }
+    if (Platform.OS === 'web') window.alert(`저장 완료 🍽️\n${alertMsg}`);
+    else Alert.alert('저장 완료 🍽️', alertMsg);
   };
 
-  // 5. 식성 5단계 평가 버튼 렌더링 함수
   const renderScale = (type, labels) => {
     const values = [-2, -1, 0, 1, 2]; 
     return (
       <View style={styles.scaleGroup}>
         {values.map((val, idx) => (
-          <TouchableOpacity 
-            key={idx} 
-            style={[styles.scaleBtn, feedback[type] === val && styles.scaleBtnActive]} 
-            onPress={() => setFeedback({ ...feedback, [type]: val })}
-          >
+          <TouchableOpacity key={idx} style={[styles.scaleBtn, feedback[type] === val && styles.scaleBtnActive]} onPress={() => setFeedback({ ...feedback, [type]: val })}>
             <Text style={[styles.scaleBtnText, feedback[type] === val && styles.scaleBtnTextActive]}>{labels[idx]}</Text>
           </TouchableOpacity>
         ))}
@@ -89,6 +95,17 @@ export default function RecipeScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}><Text style={styles.headerTitle}>AI 맞춤 레시피</Text></View>
+
+      <View style={styles.statusBox}>
+        {isPremium ? (
+          <Text style={styles.premiumText}>👑 프리미엄 회원 (무제한 이용 중)</Text>
+        ) : (
+          <Text style={styles.freeText}>남은 무료 횟수: <Text style={{fontWeight: 'bold'}}>{freeCount}회</Text></Text>
+        )}
+      </View>
+      <TouchableOpacity style={styles.mainGenerateButton} onPress={handleGenerateRecipe}>
+        <Text style={styles.mainGenerateButtonText}>내 냉장고로 새 레시피 생성하기</Text>
+      </TouchableOpacity>
       
       <View style={styles.categoryContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -112,7 +129,6 @@ export default function RecipeScreen() {
               <View style={styles.itemBox}><Text style={styles.itemIcon}>🥔</Text><Text style={styles.oldItem}>감자 (없음)</Text></View>
               <Ionicons name="arrow-forward" size={24} color="#bdc3c7" style={styles.arrowIcon} />
               <View style={[styles.itemBox, styles.newItemBox]}>
-                {/* 이 부분은 getCategoryIcon이 정의되지 않아 임시 이모지로 둡니다 */}
                 <Text style={styles.itemIcon}>{firstItem ? '✨' : '❓'}</Text> 
                 <Text style={styles.newItem}>{firstItem ? `${firstItem.name}` : '재료 없음'}</Text>
               </View>
@@ -135,13 +151,35 @@ export default function RecipeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 모달창 */}
+      <Modal visible={showAdModal} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.adModalBox}>
+            <Text style={styles.adModalTitle}>무료 횟수를 모두 소진했어요! 🥲</Text>
+            <Text style={styles.adModalDesc}>광고를 보고 1회 더 이용하거나,{'\n'}프리미엄 구독으로 무제한 이용해 보세요!</Text>
+            
+            <TouchableOpacity style={styles.adWatchButton} onPress={handleWatchAd}>
+              <Ionicons name="play-circle-outline" size={20} color="#fff" />
+              <Text style={styles.adButtonText}> 광고 보고 1회 무료 이용하기</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.premiumSubscribeButton} onPress={handleSubscribe}>
+              <Ionicons name="star" size={20} color="#fff" />
+              <Text style={styles.adButtonText}> 월 3,990원 무제한 구독하기</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={{marginTop: 15}} onPress={() => setShowAdModal(false)}>
+              <Text style={{color: '#7f8c8d', textDecorationLine: 'underline'}}>다음에 할게요</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
-              <Text style={styles.modalTitle}>요리는 어떠셨나요? 😋</Text>
-              <Text style={styles.modalSubtitle}>피드백을 통해 AI가 더 똑똑해집니다</Text>
+              <Text style={styles.feedbackModalTitle}>요리는 어떠셨나요? 😋</Text>
+              <Text style={styles.feedbackModalSubtitle}>피드백을 통해 AI가 더 똑똑해집니다</Text>
               
               <View style={styles.ratingSection}>
                 {[1, 2, 3, 4, 5].map((star) => (
@@ -155,7 +193,6 @@ export default function RecipeScreen() {
               
               <View style={styles.divider} />
               <View style={styles.feedbackSection}>
-                {/* 💡 6가지 맛에 대한 평가 */}
                 <View style={styles.feedbackRow}><Text style={styles.feedbackLabel}>🔥 매운맛</Text>{renderScale('spicy', ['너무\n맵다', '맵다', '딱\n좋다', '안\n맵다', '너무\n안맵다'])}</View>
                 <View style={styles.feedbackRow}><Text style={styles.feedbackLabel}>🧂 짠맛 (간)</Text>{renderScale('salty', ['너무\n짜다', '짜다', '딱\n좋다', '싱겁다', '너무\n싱겁다'])}</View>
                 <View style={styles.feedbackRow}><Text style={styles.feedbackLabel}>🍯 단맛</Text>{renderScale('sweet', ['너무\n달다', '달다', '딱\n좋다', '안\n달다', '너무\n안달다'])}</View>
@@ -166,7 +203,6 @@ export default function RecipeScreen() {
             </ScrollView>
 
             <View style={styles.modalButtonGroup}>
-              {/* 💡 반영 안 함 버튼 스타일 (글씨가 안보이는 현상 해결) */}
               <TouchableOpacity style={styles.noReflectBtn} onPress={() => saveRecipeRecord(false)}>
                 <Text style={styles.noReflectBtnText}>기록만 하고 내 입맛에는 반영 안 함 ❌</Text>
               </TouchableOpacity>
@@ -176,7 +212,6 @@ export default function RecipeScreen() {
                 <TouchableOpacity style={styles.submitBtn} onPress={() => saveRecipeRecord(true)}><Text style={styles.submitBtnText}>입맛 반영하기 ✨</Text></TouchableOpacity>
               </View>
             </View>
-
           </View>
         </View>
       </Modal>
@@ -188,11 +223,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f6fa' },
   header: { padding: 20, paddingTop: 60, backgroundColor: '#fff', paddingBottom: 10 },
   headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50' },
-  categoryContainer: { backgroundColor: '#fff', paddingBottom: 10, paddingHorizontal: 15 },
+  
+  // 💡 [수정됨] 여백(margin/padding)을 깎아서 전체적으로 버튼들을 위로 끌어올렸습니다.
+  statusBox: { padding: 12, backgroundColor: '#f1f2f6', borderRadius: 10, alignItems: 'center', marginHorizontal: 15, marginBottom: 8 },
+  freeText: { fontSize: 14, color: '#2c3e50' },
+  premiumText: { fontSize: 14, color: '#e67e22', fontWeight: 'bold' },
+  mainGenerateButton: { backgroundColor: '#3498db', padding: 14, borderRadius: 12, alignItems: 'center', marginHorizontal: 15, marginBottom: 15 },
+  mainGenerateButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
+  // 💡 [수정됨] 카테고리 버튼이 잘리지 않도록 paddingVertical 값을 추가했습니다.
+  categoryContainer: { backgroundColor: '#fff', paddingVertical: 8, paddingHorizontal: 15, marginBottom: 5 },
   categoryBadge: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f1f2f6', marginRight: 10 },
   categoryBadgeActive: { backgroundColor: '#2ecc71' },
   categoryText: { color: '#7f8c8d', fontWeight: '600' },
   categoryTextActive: { color: '#fff' },
+  
   recipeCard: { backgroundColor: '#fff', margin: 15, padding: 20, borderRadius: 15, elevation: 2 },
   badge: { alignSelf: 'flex-start', backgroundColor: '#e8f8f5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, marginBottom: 10 },
   badgeText: { color: '#1abc9c', fontWeight: 'bold', fontSize: 12 },
@@ -214,9 +259,17 @@ const styles = StyleSheet.create({
   cookButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
+  
+  adModalBox: { width: '85%', backgroundColor: '#fff', padding: 25, borderRadius: 20, alignItems: 'center', alignSelf: 'center', marginBottom: Platform.OS === 'web' ? 0 : '50%' },
+  adModalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
+  adModalDesc: { fontSize: 14, color: '#7f8c8d', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
+  adWatchButton: { flexDirection: 'row', backgroundColor: '#3498db', padding: 15, borderRadius: 10, width: '100%', justifyContent: 'center', marginBottom: 10 },
+  premiumSubscribeButton: { flexDirection: 'row', backgroundColor: '#9b59b6', padding: 15, borderRadius: 10, width: '100%', justifyContent: 'center' },
+  adButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+
   modalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '90%', maxHeight: Platform.OS === 'web' ? 720 : '100%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: Platform.OS === 'web' ? 30 : 0, borderBottomRightRadius: Platform.OS === 'web' ? 30 : 0, padding: 25, alignItems: 'center', paddingBottom: 40 },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50', marginBottom: 10, textAlign: 'center' },
-  modalSubtitle: { fontSize: 14, color: '#7f8c8d', textAlign: 'center', marginBottom: 20 },
+  feedbackModalTitle: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50', marginBottom: 10, textAlign: 'center' },
+  feedbackModalSubtitle: { fontSize: 14, color: '#7f8c8d', textAlign: 'center', marginBottom: 20 },
   ratingSection: { flexDirection: 'row', justifyContent: 'center', marginBottom: 15 },
   starIcon: { marginHorizontal: 5 },
   commentInput: { backgroundColor: '#f1f2f6', padding: 15, borderRadius: 10, fontSize: 14, color: '#2c3e50', marginBottom: 20, width: '100%' },
@@ -229,8 +282,6 @@ const styles = StyleSheet.create({
   scaleBtnActive: { backgroundColor: '#3498db' },
   scaleBtnText: { color: '#7f8c8d', fontSize: 11, fontWeight: '600', textAlign: 'center', lineHeight: 16 },
   scaleBtnTextActive: { color: '#fff', fontWeight: 'bold' },
-  
-  // 💡 버튼 그룹 정렬 완료
   modalButtonGroup: { width: '100%', marginTop: 10, paddingTop: 10, alignItems: 'center' },
   noReflectBtn: { backgroundColor: '#95a5a6', paddingVertical: 14, paddingHorizontal: 20, borderRadius: 12, marginBottom: 15, width: '100%', alignItems: 'center', justifyContent: 'center' },
   noReflectBtnText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },

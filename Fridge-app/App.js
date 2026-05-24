@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { NavigationContainer } from '@react-navigation/native';
+// 💡 [수정됨] BottomTabBar를 추가로 가져옵니다!
+import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { useState } from 'react';
 import { Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -12,7 +13,6 @@ import MyPageScreen from './screens/MyPageScreen';
 import RecipeScreen from './screens/RecipeScreen';
 import SignUpScreen from './screens/SignUpScreen';
 
-// 💡 유저 보관함 불러오기
 import { useUserStore } from './store/useUserStore';
 
 const Tab = createBottomTabNavigator();
@@ -21,8 +21,11 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false); 
   const [authScreen, setAuthScreen] = useState('login'); 
 
-  // 💡 보관함에서 챗봇 스위치 상태 꺼내오기
+  const navigationRef = useNavigationContainerRef();
+  const [currentRoute, setCurrentRoute] = useState('홈');
+
   const isChatHidden = useUserStore((state) => state.isChatHidden);
+  const isPremium = useUserStore((state) => state.isPremium);
 
   const [chatVisible, setChatVisible] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -76,8 +79,26 @@ export default function App() {
   return (
     <View style={styles.rootBackground}> 
       <View style={styles.webContainer}> 
-        <NavigationContainer>
+        <NavigationContainer
+          ref={navigationRef}
+          onStateChange={() => {
+            const routeName = navigationRef.getCurrentRoute()?.name;
+            if (routeName) setCurrentRoute(routeName);
+          }}
+        >
           <Tab.Navigator
+            // 💡 [핵심 수정] 기본 탭 바 위에 배너를 블록 쌓듯이 얹습니다!
+            tabBar={(props) => (
+              <View>
+                {!isPremium && isLoggedIn && ['홈', '재고관리', '마이페이지'].includes(currentRoute) && (
+                  <View style={styles.globalBannerAd}>
+                    <Text style={styles.globalBannerText}>광고: 오늘 저녁은 마켓컬리에서 할인받고 주문하세요! 🍅</Text>
+                  </View>
+                )}
+                {/* 원래 있던 기본 탭 바를 손상 없이 그대로 그려줍니다 */}
+                <BottomTabBar {...props} />
+              </View>
+            )}
             screenOptions={({ route }) => ({
               headerShown: false,
               tabBarIcon: ({ color, size }) => {
@@ -91,6 +112,7 @@ export default function App() {
               },
               tabBarActiveTintColor: '#2ecc71',
               tabBarInactiveTintColor: 'gray',
+              // 💡 [수정됨] 강제 높이(height: 55)를 삭제하여 글씨 잘림(찌그러짐) 현상을 없앴습니다!
               tabBarStyle: Platform.OS === 'web' ? { height: 64, paddingBottom: 10 } : { paddingTop: 5 }, 
               tabBarLabelStyle: { fontSize: 11, fontWeight: 'bold', paddingBottom: Platform.OS === 'ios' ? 0 : 5 }
             })}
@@ -105,7 +127,6 @@ export default function App() {
           </Tab.Navigator>
         </NavigationContainer>
 
-        {/* 💡 스위치(isChatHidden)가 꺼져 있을 때만 챗봇을 화면에 그립니다! */}
         {!isChatHidden && (
           <TouchableOpacity style={styles.chatFab} onPress={() => setChatVisible(true)}>
             <Ionicons name="chatbubble-ellipses" size={30} color="white" />
@@ -168,7 +189,8 @@ const styles = StyleSheet.create({
   } : {
     flex: 1, width: '100%', backgroundColor: '#ffffff'
   },
-  chatFab: { position: 'absolute', bottom: 110, right: 20, backgroundColor: '#3498db', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 8 },
+  // 💡 챗봇 버튼이 배너 위로 잘 올라오도록 위치(bottom)를 살짝 여유 있게 두었습니다.
+  chatFab: { position: 'absolute', bottom: 120, right: 20, backgroundColor: '#3498db', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 8, zIndex: 100 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
   chatModalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '80%', backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, paddingBottom: 30 },
   chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 15, marginBottom: 15 },
@@ -181,4 +203,20 @@ const styles = StyleSheet.create({
   chatInputRow: { flexDirection: 'row', alignItems: 'center' },
   chatInputBox: { flex: 1, backgroundColor: '#f1f2f6', borderRadius: 25, paddingHorizontal: 20, paddingVertical: 12, marginRight: 10, fontSize: 15 },
   chatSendBtn: { backgroundColor: '#2ecc71', width: 45, height: 45, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
+  
+  // 💡 [핵심 수정] absolute(둥둥 띄우기)를 빼고 100% 폭을 가진 블록으로 만들었습니다!
+  globalBannerAd: { 
+    width: '100%', 
+    height: 50, 
+    backgroundColor: '#ecf0f1', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    borderTopWidth: 1, 
+    borderColor: '#bdc3c7'
+  },
+  globalBannerText: { 
+    color: '#95a5a6', 
+    fontSize: 12, 
+    fontWeight: 'bold' 
+  },
 });
