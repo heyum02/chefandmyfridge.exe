@@ -5,6 +5,8 @@ const cors = require('cors');
 
 dotenv.config();
 const app = express();
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 app.use(cors()); 
 app.use(express.json()); 
@@ -117,7 +119,12 @@ app.delete('/api/fridge/:item_id', async (req, res) => {
     }
 });
 
-// 서버 실행
+// 배포 확인용 간단한 헬스 체크
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
+
+// 서버 실행 (반드시 파일의 가장 맨 밑에 있어야함)
 app.listen(3000, () => {
     console.log("🚀 서버 가동 시작! 브라우저를 확인하세요.");
 });
