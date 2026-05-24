@@ -1,68 +1,63 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-
-// 💡 냉장고 보관함 불러오기
+import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
+// 💡 주방도구 카테고리 동기화
+const toolCategories = {
+  "🔥 가열 기구": ["가스레인지", "인덕션", "오븐", "전자레인지", "에어프라이어", "밥솥", "전기팬", "전기밥솥", "토치"],
+  "🍳 팬/냄비": ["냄비", "프라이팬", "주물팬", "달걀말이팬", "오븐팬", "베이킹팬", "머핀팬", "와플팬", "쿠킹팬"],
+  "🔪 조리 도구": ["도마", "칼", "가위", "조리용나이프", "조리용스푼", "조리주걱", "스푼", "주걱", "국자", "집게", "거품기", "주방용스패츌라"],
+  "🥣 볼/채반": ["볼", "믹싱볼", "채반", "채망", "거름망", "식힘망"],
+  "🔌 가전 기기": ["믹서기", "블렌더", "핸드믹서", "핸드블렌더", "전자저울"],
+  "🍽️ 식기/기타": ["그릇", "접시", "플레이트", "컵", "병", "포크", "트레이", "키친타올", "장갑", "주방솔", "랩", "포장지"]
+};
+
 export default function MyPageScreen({ onLogout }) {
-  // 유저 정보 가져오기
   const nickname = useUserStore((state) => state.nickname);
   const email = useUserStore((state) => state.email);
-  // 💡 지우개 기능 가져오기
   const clearUser = useUserStore((state) => state.clearUser);
-
-  // 냉장고 재료 개수 및 지우개 기능 가져오기
   const ingredients = useFridgeStore((state) => state.ingredients);
-  const clearFridge = useFridgeStore((state) => state.clearFridge); // 💡 지우개 가져오기
-
-  // 💡 프로필 관리용 상태 및 함수 가져오기
+  const clearFridge = useFridgeStore((state) => state.clearFridge); 
   const userProfile = useUserStore((state) => state.userProfile);
   const updateFullProfile = useUserStore((state) => state.updateFullProfile);
 
-  // 💡 모달창 컨트롤 및 임시 저장소 (수정 중인 데이터)
   const [modalVisible, setModalVisible] = useState(false);
   const [tempAllergies, setTempAllergies] = useState([]);
   const [tempTools, setTempTools] = useState([]);
-  const [tempTastes, setTempTastes] = useState({ spicy: 3, salty: 3, sweet: 3 });
+  const [tempTastes, setTempTastes] = useState({ spicy: 3, salty: 3, sweet: 3, bitter: 3, sour: 3, savory: 3 });
 
-  // 💡 로그아웃 버튼을 눌렀을 때 실행될 새로운 함수
   const handleLogout = () => {
-    clearUser();   // 1. 내 이름/이메일 지우기
-    clearFridge(); // 2. 내 냉장고 재료 지우기
-    onLogout();    // 3. App.js에 신호를 보내서 로그인 화면으로 이동시키기
+    clearUser();   
+    clearFridge(); 
+    onLogout();    
   };
 
-  // 모달창 열 때 기존 데이터를 임시 저장소에 세팅하는 함수
   const openProfileModal = () => {
     setTempAllergies(userProfile.allergies);
     setTempTools(userProfile.kitchenTools);
-    setTempTastes(userProfile.tastes);
+    setTempTastes({ 
+      spicy: userProfile.tastes?.spicy || 3, salty: userProfile.tastes?.salty || 3, sweet: userProfile.tastes?.sweet || 3,
+      bitter: userProfile.tastes?.bitter || 3, sour: userProfile.tastes?.sour || 3, savory: userProfile.tastes?.savory || 3,
+    });
     setModalVisible(true);
   };
 
-  // 칩 선택/해제 토글 함수
   const toggleSelection = (item, list, setList) => {
     if (list.includes(item)) setList(list.filter((i) => i !== item));
     else setList([...list, item]);
   };
 
-  // 변경사항 저장 함수
   const handleSaveProfile = () => {
-    updateFullProfile({
-      allergies: tempAllergies,
-      kitchenTools: tempTools,
-      tastes: tempTastes,
-    });
+    updateFullProfile({ allergies: tempAllergies, kitchenTools: tempTools, tastes: tempTastes });
     setModalVisible(false);
-    Alert.alert('업데이트 완료', '맞춤 설정이 안전하게 변경되었습니다!');
+    if(Platform.OS === 'web') window.alert('업데이트 완료\n맞춤 설정이 안전하게 변경되었습니다!');
+    else Alert.alert('업데이트 완료', '맞춤 설정이 안전하게 변경되었습니다!');
   };
 
   const allergyOptions = ['난류', '우유', '땅콩', '대두', '밀', '생선', '갑각류'];
-  const toolOptions = ['가스레인지', '인덕션', '전자레인지', '에어프라이어', '냄비', '프라이팬', '오븐', '믹서기'];
 
-  // 1~5 절대 수치 평가용 버튼을 그려주는 함수
   const renderAbsoluteScale = (type, label) => {
     const levels = [1, 2, 3, 4, 5];
     return (
@@ -70,11 +65,7 @@ export default function MyPageScreen({ onLogout }) {
         <Text style={styles.feedbackLabel}>{label}</Text>
         <View style={styles.scaleGroup}>
           {levels.map((val) => (
-            <TouchableOpacity
-              key={val}
-              style={[styles.scaleBtn, tempTastes[type] === val && styles.scaleBtnActive]}
-              onPress={() => setTempTastes({ ...tempTastes, [type]: val })}
-            >
+            <TouchableOpacity key={val} style={[styles.scaleBtn, tempTastes[type] === val && styles.scaleBtnActive]} onPress={() => setTempTastes({ ...tempTastes, [type]: val })}>
               <Text style={[styles.scaleBtnText, tempTastes[type] === val && styles.scaleBtnTextActive]}>{val}</Text>
             </TouchableOpacity>
           ))}
@@ -85,23 +76,14 @@ export default function MyPageScreen({ onLogout }) {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* 1. 상단 헤더 */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>마이페이지</Text>
-      </View>
-
-      {/* 2. 프로필 섹션 */}
+      <View style={styles.header}><Text style={styles.headerTitle}>마이페이지</Text></View>
       <View style={styles.profileSection}>
-        <View style={styles.avatar}>
-          <Ionicons name="person" size={40} color="#bdc3c7" />
-        </View>
+        <View style={styles.avatar}><Ionicons name="person" size={40} color="#bdc3c7" /></View>
         <View style={styles.profileInfo}>
           <Text style={styles.userName}>{nickname} 님</Text>
           <Text style={styles.userEmail}>{email}</Text> 
         </View>
       </View>
-
-      {/* 3. 내 활동 요약 통계 카드 */}
       <View style={styles.statsCard}>
         <View style={styles.statItem}>
           <Text style={styles.statNumber}>{ingredients.length}</Text>
@@ -113,10 +95,7 @@ export default function MyPageScreen({ onLogout }) {
           <Text style={styles.statLabel}>저장한 레시피</Text>
         </View>
       </View>
-
-      {/* 4. 설정 메뉴 리스트 */}
       <View style={styles.menuList}>
-        {/* 💡 내 맞춤 설정 관리 메뉴 */}
         <TouchableOpacity style={styles.menuItem} onPress={openProfileModal}>
           <View style={styles.menuLeft}>
             <Ionicons name="options-outline" size={24} color="#34495e" />
@@ -124,21 +103,16 @@ export default function MyPageScreen({ onLogout }) {
           </View>
           <Ionicons name="chevron-forward" size={24} color="#bdc3c7" />
         </TouchableOpacity>
-        
-        {/* 💡 로그아웃 버튼 */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutText}>로그아웃</Text>
         </TouchableOpacity>
       </View>
 
-      {/* 💡 맞춤 설정 수정 모달창 */}
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>맞춤 정보 설정</Text>
-            
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
-              {/* 알러지 수정 */}
               <Text style={styles.sectionSubtitle}>⚠️ 알러지 정보</Text>
               <View style={styles.chipContainer}>
                 {allergyOptions.map((item) => (
@@ -147,32 +121,34 @@ export default function MyPageScreen({ onLogout }) {
                   </TouchableOpacity>
                 ))}
               </View>
-
-              {/* 주방 도구 수정 */}
+              
+              {/* 💡 주방 도구 카테고리화 렌더링 */}
               <Text style={styles.sectionSubtitle}>🍳 주방 도구</Text>
-              <View style={styles.chipContainer}>
-                {toolOptions.map((item) => (
-                  <TouchableOpacity key={item} style={[styles.chip, tempTools.includes(item) && styles.activeChip]} onPress={() => toggleSelection(item, tempTools, setTempTools)}>
-                    <Text style={[styles.chipText, tempTools.includes(item) && styles.activeChipText]}>{item}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              {Object.entries(toolCategories).map(([categoryName, tools]) => (
+                <View key={categoryName} style={{ marginBottom: 15 }}>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#34495e', marginBottom: 8 }}>{categoryName}</Text>
+                  <View style={styles.chipContainer}>
+                    {tools.map((item) => (
+                      <TouchableOpacity key={item} style={[styles.chip, tempTools.includes(item) && styles.activeChip]} onPress={() => toggleSelection(item, tempTools, setTempTools)}>
+                        <Text style={[styles.chipText, tempTools.includes(item) && styles.activeChipText]}>{item}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ))}
 
-              {/* 식성 절대 수치 수정 (1~5) */}
               <Text style={styles.sectionSubtitle}>😋 내 입맛 수동 조절 (1~5단계)</Text>
               <Text style={{ fontSize: 12, color: '#7f8c8d', marginBottom: 15 }}>* 레시피 평가를 통해서도 자동으로 변합니다.</Text>
               {renderAbsoluteScale('spicy', '🔥 매운맛 선호도')}
               {renderAbsoluteScale('salty', '🧂 짠맛 선호도')}
               {renderAbsoluteScale('sweet', '🍯 단맛 선호도')}
+              {renderAbsoluteScale('bitter', '☕ 쓴맛 선호도')}
+              {renderAbsoluteScale('sour', '🍋 신맛 선호도')}
+              {renderAbsoluteScale('savory', '🥩 감칠맛 선호도')}
             </ScrollView>
-
             <View style={styles.modalButtonGroup}>
-              <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
-                <Text style={styles.closeBtnText}>취소</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSaveProfile}>
-                <Text style={styles.submitBtnText}>저장하기</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={styles.closeBtnText}>취소</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.submitBtn} onPress={handleSaveProfile}><Text style={styles.submitBtnText}>저장하기</Text></TouchableOpacity>
             </View>
           </View>
         </View>
@@ -201,12 +177,11 @@ const styles = StyleSheet.create({
   menuText: { fontSize: 16, color: '#2c3e50', marginLeft: 15 },
   logoutBtn: { marginTop: 30, alignItems: 'center', padding: 15, backgroundColor: '#ffecec', borderRadius: 10 },
   logoutText: { color: '#e74c3c', fontWeight: 'bold', fontSize: 16 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalContent: { width: '100%', height: '85%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, alignItems: 'flex-start' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
+  modalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '85%', maxHeight: Platform.OS === 'web' ? 720 : '100%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: Platform.OS === 'web' ? 30 : 0, borderBottomRightRadius: Platform.OS === 'web' ? 30 : 0, padding: 25, alignItems: 'flex-start' },
   modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50', marginBottom: 20, alignSelf: 'center' },
   sectionSubtitle: { fontSize: 16, fontWeight: 'bold', color: '#34495e', marginTop: 15, marginBottom: 10 },
-  chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { backgroundColor: '#f1f2f6', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 },
   activeChip: { backgroundColor: '#2ecc71' },
   chipText: { color: '#7f8c8d', fontSize: 13, fontWeight: '500' },
