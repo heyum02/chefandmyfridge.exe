@@ -18,10 +18,22 @@ const pool = mysql.createPool({
     database: process.env.DB_NAME
 });
 
+let hasExpiryDateColumnCache;
+
+async function hasExpiryDateColumn() {
+    if (typeof hasExpiryDateColumnCache === 'boolean') {
+        return hasExpiryDateColumnCache;
+    }
+
+    const [columns] = await pool.query("SHOW COLUMNS FROM fridge_items LIKE 'expiry_date'");
+    hasExpiryDateColumnCache = columns.length > 0;
+    return hasExpiryDateColumnCache;
+}
+
 // [API 1] 냉장고 전체 재고 조회 (명세서 완벽 일치)
 app.get('/api/fridge', async (req, res) => {
     try {
-        // 프론트엔드가 요구하는 이름(id, amount, expiryDate 등)으로 바꿔서(AS) 전달
+        const hasExpiryDate = await hasExpiryDateColumn();
         const query = `
             SELECT 
                 f.item_id AS id, 
@@ -29,7 +41,7 @@ app.get('/api/fridge', async (req, res) => {
                 i.category, 
                 f.quantity AS amount, 
                 f.unit, 
-                f.expiry_date AS expiryDate
+                ${hasExpiryDate ? 'f.expiry_date' : 'NULL'} AS expiryDate
             FROM fridge_items f 
             JOIN ingredients i ON f.ingredient_id = i.ingredient_id`;
         const [rows] = await pool.query(query);
@@ -43,6 +55,8 @@ app.get('/api/fridge', async (req, res) => {
 app.post('/api/fridge/add', async (req, res) => {
     const { name, category, amount, unit, expiryDate } = req.body;
     try {
+        const hasExpiryDate = await hasExpiryDateColumn();
+
         // 1. 재료 사전에 있는지 확인 (Vision AI 로직과 동일하게 변경)
         let [ing] = await pool.query('SELECT ingredient_id FROM ingredients WHERE name = ?', [name]);
         let ingId;
@@ -55,8 +69,13 @@ app.post('/api/fridge/add', async (req, res) => {
         }
 
         // 2. 냉장고 재고에 저장
-        const sql = 'INSERT INTO fridge_items (ingredient_id, quantity, unit, expiry_date) VALUES (?, ?, ?, ?)';
-        const [result] = await pool.query(sql, [ingId, amount, unit, expiryDate || null]);
+        const sql = hasExpiryDate
+            ? 'INSERT INTO fridge_items (ingredient_id, quantity, unit, expiry_date) VALUES (?, ?, ?, ?)'
+            : 'INSERT INTO fridge_items (ingredient_id, quantity, unit) VALUES (?, ?, ?)';
+        const params = hasExpiryDate
+            ? [ingId, amount, unit, expiryDate || null]
+            : [ingId, amount, unit];
+        const [result] = await pool.query(sql, params);
         
         // 3. 명세서 조건: 추가된 식재료의 id 반환
         res.json({ id: result.insertId, message: "식재료가 수동으로 추가되었습니다!" });
@@ -94,6 +113,12 @@ app.put('/api/fridge/:item_id', async (req, res) => {
     const { expiryDate } = req.body; 
 
     try {
+        const hasExpiryDate = await hasExpiryDateColumn();
+
+        if (!hasExpiryDate) {
+            return res.status(400).json({ error: "expiry_date 컬럼이 없어 소비기한을 수정할 수 없습니다." });
+        }
+
         const sql = 'UPDATE fridge_items SET expiry_date = ? WHERE item_id = ?';
         await pool.query(sql, [expiryDate, item_id]);
         
@@ -125,6 +150,6 @@ app.get('/health', (req, res) => {
 });
 
 // 서버 실행 (반드시 파일의 가장 맨 밑에 있어야함)
-app.listen(3000, () => {
-    console.log("🚀 서버 가동 시작! 브라우저를 확인하세요.");
+app.listen(PORT, HOST, () => {
+    console.log(`Server listening on http://${HOST}:${PORT}`);
 });
