@@ -20,7 +20,7 @@ export default function LoginScreen({ onLogin, onGoToSignUp }) {
 
     // 2. 서버 연결 테스트
     try {
-      const backendUrl = 'https://twelve-forks-run.loca.lt'; 
+      const backendUrl = 'https://twelve-forks-run.loca.lt/fridge'; 
       const response = await axios.get(backendUrl, { headers: { "Bypass-Tunnel-Reminder": "true" } });
       
       // 진짜로 완벽하게 200 OK 성공했을 때!

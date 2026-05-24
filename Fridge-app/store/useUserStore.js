@@ -48,6 +48,14 @@ export const useUserStore = create((set) => ({
     )
   })),
 
+  // 💡 [추가됨] 구독 및 무료 횟수 상태
+  isPremium: false,
+  freeCount: 10,
+  
+  setIsPremium: (status) => set({ isPremium: status }),
+  decreaseFreeCount: () => set((state) => ({ freeCount: state.freeCount > 0 ? state.freeCount - 1 : 0 })),
+  addFreeCount: (amount) => set((state) => ({ freeCount: state.freeCount + amount })),
+
   clearUser: () => set({ 
     nickname: '새로운 요리사', 
     email: 'guest@example.com',
