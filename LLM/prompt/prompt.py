@@ -4,14 +4,17 @@ RAG 기반 레시피 추천 및 상세 조리 프롬프트만 제공합니다.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
+
+
+IngredientInput = Union[str, Dict[str, str]]
 
 
 @dataclass
 class RecipeRecommendationRequest:
     """레시피 추천 프롬프트 입력"""
 
-    ingredients: List[str]
+    ingredients: List[IngredientInput]
     rag_context: str
     allergies: List[str] = field(default_factory=list)
     cooking_tools: List[str] = field(default_factory=list)
@@ -25,7 +28,7 @@ class RecipeDetailRequest:
 
     recipe_name: str
     rag_context: str
-    available_ingredients: List[str]
+    available_ingredients: List[IngredientInput]
     substitution_context: Optional[str] = None
     missing_ingredients: List[str] = field(default_factory=list)
     allergies: List[str] = field(default_factory=list)
@@ -44,7 +47,7 @@ class RecipeFollowUpRequest:
     user_followup_question: str
     rag_context: Optional[str] = None
     substitution_context: Optional[str] = None
-    available_ingredients: List[str] = field(default_factory=list)
+    available_ingredients: List[IngredientInput] = field(default_factory=list)
     allergies: List[str] = field(default_factory=list)
     selected_tools: List[str] = field(default_factory=list)
     cooking_history: List[str] = field(default_factory=list)
@@ -53,6 +56,33 @@ class RecipeFollowUpRequest:
 
 class PromptGenerator:
     """레시피 추천/상세 안내 프롬프트 생성기"""
+
+    @staticmethod
+    def _format_ingredients(ingredients: List[IngredientInput]) -> str:
+        """재료 목록을 프롬프트용 문자열로 변환"""
+        if not ingredients:
+            return ""
+
+        formatted = []
+        for ingredient in ingredients:
+            if isinstance(ingredient, dict):
+                name = ingredient.get("name", "").strip()
+                amount = str(ingredient.get("amount", "")).strip()
+                unit = ingredient.get("unit", "").strip()
+                note = ingredient.get("note", "").strip()
+
+                text = name or "이름 없는 재료"
+                if amount:
+                    text += f" {amount}"
+                if unit:
+                    text += f"{unit}"
+                if note:
+                    text += f" ({note})"
+                formatted.append(text)
+            else:
+                formatted.append(str(ingredient))
+
+        return ", ".join(formatted)
 
     @staticmethod
     def _format_conversation_history(conversation_history: List[Dict[str, str]]) -> str:
@@ -97,19 +127,21 @@ class PromptGenerator:
 
 추천 규칙:
 1. 사용자의 현재 보유 재료를 최우선으로 반영합니다.
-2. 레시피에 필요한 재료 중 최대 2개까지는 없어도 추천 가능합니다.
-3. 알레르기 유발 재료가 포함된 레시피는 제외합니다.
-4. 사용 가능한 조리 도구로 만들기 어려운 레시피는 우선순위를 낮추거나 제외합니다.
-5. 사용자의 이전 요리 기록을 참고해 너무 비슷한 요리만 반복 추천하지 말고 적절히 다양성을 반영합니다.
-6. 난이도와 예상 조리 시간을 반드시 포함합니다.
+2. 사용자의 보유 재료는 이름뿐 아니라 수량과 단위도 함께 고려합니다.
+3. 레시피에 필요한 재료 중 최대 2개까지는 없어도 추천 가능합니다.
+4. 재료가 아예 없지 않더라도 양이 부족하면 부족한 재료로 판단할 수 있습니다.
+5. 알레르기 유발 재료가 포함된 레시피는 제외합니다.
+6. 사용 가능한 조리 도구로 만들기 어려운 레시피는 우선순위를 낮추거나 제외합니다.
+7. 사용자의 이전 요리 기록을 참고해 너무 비슷한 요리만 반복 추천하지 말고 적절히 다양성을 반영합니다.
+8. 난이도와 예상 조리 시간을 반드시 포함합니다.
 
 응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
 
         user_parts = [
             "다음 조건을 바탕으로 RAG 레시피 후보에서 만들 수 있는 요리 목록을 추천해줘.",
-            f"현재 보유 재료: {', '.join(ingredients)}",
+            f"현재 보유 재료: {PromptGenerator._format_ingredients(ingredients)}",
             f"최대 추천 개수: {max_results}",
-            "부족한 재료는 레시피당 최대 2개까지 허용",
+            "부족한 재료 또는 양이 부족한 재료는 레시피당 최대 2개까지 허용",
         ]
 
         if allergies:
@@ -133,6 +165,8 @@ class PromptGenerator:
       "difficulty": "쉬움/보통/어려움",
       "estimated_time_minutes": 20,
       "available_ingredients": ["가지고 있는 재료1", "가지고 있는 재료2"],
+      "available_ingredients_detail": ["계란 2개", "양파 1/2개"],
+      "insufficient_ingredients": ["토마토(양 부족)"],
       "missing_ingredients": ["없는 재료1"],
       "missing_ingredient_count": 1,
       "required_tools": ["프라이팬"],
@@ -143,6 +177,7 @@ class PromptGenerator:
 
 중요:
 - missing_ingredient_count는 반드시 숫자로 작성
+- insufficient_ingredients에는 양이 부족한 재료만 포함
 - missing_ingredients는 최대 2개까지만 포함
 - recipes 배열은 추천 우선순위 순서대로 정렬
 - 조건에 맞는 요리가 없으면 {"recipes": []} 로 응답
@@ -174,7 +209,7 @@ class PromptGenerator:
 응답 규칙:
 1. 사용자의 추가 질문에 직접적으로 답합니다.
 2. 이전에 제안한 대체재, 입맛 조정, 영양 정보와 충돌하지 않게 답합니다.
-3. 사용 가능한 재료, 알레르기, 조리 도구, 이전 피드백을 계속 반영합니다.
+3. 사용 가능한 재료의 이름뿐 아니라 남은 양과 단위도 계속 반영합니다.
 4. RAG 컨텍스트에 근거가 있으면 그것을 우선 사용하고, 부족한 경우에만 제한적으로 추론합니다.
 5. 추가 질문이 조리법 변경을 요구하면 변경된 부분이 무엇인지 분명히 설명합니다.
 6. 이전 대화 히스토리가 있으면 그 안의 최근 합의사항과 제약을 계속 유지합니다.
@@ -198,7 +233,7 @@ class PromptGenerator:
 
         if request.available_ingredients:
             user_parts.append(
-                f"현재 보유 재료: {', '.join(request.available_ingredients)}"
+                f"현재 보유 재료: {PromptGenerator._format_ingredients(request.available_ingredients)}"
             )
 
         if request.allergies:
@@ -251,6 +286,7 @@ class PromptGenerator:
 - 변경점이 없으면 changes는 빈 배열로 출력
 - 항상 같은 recipe_name 맥락을 유지
 - conversation_history가 있으면 가장 최근 합의사항을 우선 반영
+- 재료 양이 부족해서 변경된 경우 changes에 그 사유를 명시
 """.strip()
         )
 
@@ -291,18 +327,20 @@ class PromptGenerator:
 작업 규칙:
 1. 선택된 레시피 1개만 설명합니다.
 2. 없는 재료가 있으면 대체 가능한 재료를 우선 제안합니다.
-3. 알레르기와 충돌하는 대체재는 추천하지 않습니다.
-4. 이전 사용자의 요리 기록과 맛 관련 피드백을 참고해 간, 매운맛, 단맛, 기름진 정도를 조절합니다.
-5. 예를 들어 "너무 짜다"는 의견이 많으면 양념/소금/간장 양을 줄이고, "너무 맵다"는 의견이 많으면 고추류/매운 양념을 줄이는 식으로 반영합니다.
-6. 조리법은 대체 재료와 사용자 입맛 조정이 반영된 최종 버전으로 정리합니다.
-7. 영양 정보는 최종적으로 사용되는 재료 기준으로 요약합니다.
-8. 이전 대화 히스토리가 있으면, 이미 논의된 선호도와 제약을 유지해 같은 맥락으로 설명합니다.
+3. 보유 재료의 수량과 단위를 보고 현재 양으로 실제 조리가 가능한지 판단합니다.
+4. 재료가 아예 없거나 양이 부족하면 그 차이를 구분해서 설명합니다.
+5. 알레르기와 충돌하는 대체재는 추천하지 않습니다.
+6. 이전 사용자의 요리 기록과 맛 관련 피드백을 참고해 간, 매운맛, 단맛, 기름진 정도를 조절합니다.
+7. 예를 들어 "너무 짜다"는 의견이 많으면 양념/소금/간장 양을 줄이고, "너무 맵다"는 의견이 많으면 고추류/매운 양념을 줄이는 식으로 반영합니다.
+8. 조리법은 대체 재료와 사용자 입맛 조정이 반영된 최종 버전으로 정리합니다.
+9. 영양 정보는 최종적으로 사용되는 재료 기준으로 요약합니다.
+10. 이전 대화 히스토리가 있으면, 이미 논의된 선호도와 제약을 유지해 같은 맥락으로 설명합니다.
 
 응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
 
         user_parts = [
             f"선택한 요리: {recipe_name}",
-            f"현재 보유 재료: {', '.join(available_ingredients)}",
+            f"현재 보유 재료: {PromptGenerator._format_ingredients(available_ingredients)}",
             "\n선택된 레시피 RAG 정보:",
             rag_context,
         ]
@@ -355,6 +393,7 @@ class PromptGenerator:
         "notes": "맛/식감/주의사항"
       }
     ],
+    "insufficient": ["양이 부족한 재료1"],
     "final_used": ["최종 사용 재료1", "최종 사용 재료2"]
   },
   "taste_adjustments": [
@@ -383,6 +422,7 @@ class PromptGenerator:
 - 없는 재료가 없으면 substitutions는 빈 배열로 출력
 - cooking_history가 있으면 taste_adjustments에 반드시 반영
 - conversation_history가 있으면 이전 대화 맥락과 충돌하지 않게 반영
+- insufficient에는 재료가 있으나 양이 부족한 경우만 포함
 - instructions는 실제 최종 사용 재료와 입맛 조정 기준으로 작성
 - nutrition은 final_used 기준으로 계산/추정
 - recipe_name과 일치하는 레시피만 설명

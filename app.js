@@ -2,6 +2,9 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const cors = require('cors'); 
+const { spawn } = require('child_process');
+const path = require('path');
+const crypto = require('crypto');
 
 dotenv.config();
 const app = express();
@@ -19,6 +22,7 @@ const pool = mysql.createPool({
 });
 
 let hasExpiryDateColumnCache;
+const recipeChatSessions = new Map();
 
 async function hasExpiryDateColumn() {
     if (typeof hasExpiryDateColumnCache === 'boolean') {
@@ -28,6 +32,47 @@ async function hasExpiryDateColumn() {
     const [columns] = await pool.query("SHOW COLUMNS FROM fridge_items LIKE 'expiry_date'");
     hasExpiryDateColumnCache = columns.length > 0;
     return hasExpiryDateColumnCache;
+}
+
+function runPythonJsonScript(scriptPath, payload) {
+    return new Promise((resolve, reject) => {
+        const python = spawn('python3', [scriptPath], {
+            cwd: __dirname,
+            env: process.env,
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        python.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+
+        python.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        python.on('error', (error) => {
+            reject(error);
+        });
+
+        python.on('close', (code) => {
+            if (code !== 0) {
+                return reject(
+                    new Error(stderr.trim() || stdout.trim() || `Python exited with code ${code}`)
+                );
+            }
+
+            try {
+                resolve(JSON.parse(stdout));
+            } catch (error) {
+                reject(new Error(`Python 응답 JSON 파싱 실패: ${stdout}`));
+            }
+        });
+
+        python.stdin.write(JSON.stringify(payload || {}));
+        python.stdin.end();
+    });
 }
 
 // [API 1] 냉장고 전체 재고 조회 (명세서 완벽 일치)
@@ -141,6 +186,156 @@ app.delete('/api/fridge/:item_id', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "식재료 삭제 중 오류가 발생했습니다." });
+    }
+});
+
+// [API 6] 레시피 추천
+app.post('/api/recipe/recommend', async (req, res) => {
+    try {
+        const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'recommend_api.py');
+
+        // TODO: DB 구현 이후 재료 조회 결과로 교체 예정
+        // 현재는 요청 body의 ingredients를 무시하고 Python 내부 mock 재료를 사용함
+        const payload = {
+            query: req.body?.query,
+            allergies: req.body?.allergies || [],
+            cookingTools: req.body?.cookingTools || [],
+            cookingHistory: req.body?.cookingHistory || [],
+            maxResults: req.body?.maxResults || 5,
+        };
+
+        const result = await runPythonJsonScript(scriptPath, payload);
+
+        if (!result.success) {
+            return res.status(500).json(result);
+        }
+
+        res.json(result);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            error: '레시피 추천 API 실행 중 오류가 발생했습니다.',
+            detail: err.message,
+        });
+    }
+});
+
+// [API 7] 레시피 상세
+app.post('/api/recipe/detail', async (req, res) => {
+    try {
+        const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'detail_api.py');
+
+        // TODO: DB 구현 이후 재료 조회 결과로 교체 예정
+        // 현재는 요청 body의 ingredients를 무시하고 Python 내부 mock 재료를 사용함
+        const payload = {
+            recipeName: req.body?.recipeName,
+            missingIngredients: req.body?.missingIngredients || [],
+            allergies: req.body?.allergies || [],
+            selectedTools: req.body?.selectedTools || req.body?.cookingTools || [],
+            cookingHistory: req.body?.cookingHistory || [],
+            conversationHistory: req.body?.conversationHistory || [],
+            nutritionFocus: req.body?.nutritionFocus || null,
+        };
+
+        const result = await runPythonJsonScript(scriptPath, payload);
+
+        if (!result.success) {
+            return res.status(500).json(result);
+        }
+
+        const sessionId = crypto.randomUUID();
+        const sessionContext = {
+            ...(result.sessionContext || {}),
+            conversationHistory: [
+                ...(result.sessionContext?.conversationHistory || []),
+                {
+                    role: 'user',
+                    content: `레시피 상세 요청: ${payload.recipeName || ''}`,
+                },
+                {
+                    role: 'assistant',
+                    content: JSON.stringify(result.data),
+                },
+            ],
+            previousRecipeResponse: JSON.stringify(result.data),
+        };
+
+        recipeChatSessions.set(sessionId, sessionContext);
+
+        res.json({
+            ...result,
+            sessionId,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            error: '레시피 상세 API 실행 중 오류가 발생했습니다.',
+            detail: err.message,
+        });
+    }
+});
+
+// [API 8] 레시피 후속 대화
+app.post('/api/recipe/chat', async (req, res) => {
+    try {
+        const { sessionId, message } = req.body || {};
+
+        if (!sessionId || !message) {
+            return res.status(400).json({
+                success: false,
+                error: 'sessionId와 message는 필수입니다.',
+            });
+        }
+
+        const session = recipeChatSessions.get(sessionId);
+        if (!session) {
+            return res.status(404).json({
+                success: false,
+                error: '유효한 레시피 대화 세션을 찾을 수 없습니다.',
+            });
+        }
+
+        const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'chat_api.py');
+        const payload = {
+            recipeName: session.recipeName,
+            previousRecipeResponse: session.previousRecipeResponse,
+            userMessage: message,
+            ragContext: session.ragContext,
+            substitutionContext: session.substitutionContext,
+            availableIngredients: session.availableIngredients || [],
+            allergies: session.allergies || [],
+            selectedTools: session.selectedTools || [],
+            cookingHistory: session.cookingHistory || [],
+            conversationHistory: session.conversationHistory || [],
+        };
+
+        const result = await runPythonJsonScript(scriptPath, payload);
+
+        if (!result.success) {
+            return res.status(500).json(result);
+        }
+
+        session.conversationHistory = [
+            ...(session.conversationHistory || []),
+            { role: 'user', content: message },
+            { role: 'assistant', content: JSON.stringify(result.data) },
+        ];
+        session.previousRecipeResponse = JSON.stringify(result.data);
+        recipeChatSessions.set(sessionId, session);
+
+        res.json({
+            ...result,
+            sessionId,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            error: '레시피 후속 대화 API 실행 중 오류가 발생했습니다.',
+            detail: err.message,
+        });
     }
 });
 

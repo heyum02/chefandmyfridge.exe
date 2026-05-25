@@ -30,7 +30,12 @@ def example_recipe_recommendation():
     print(f"검색 정보: {search_info}")
 
     request = RecipeRecommendationRequest(
-        ingredients=["계란", "토마토", "양파", "식용유"],
+        ingredients=[
+            {"name": "계란", "amount": "2", "unit": "개"},
+            {"name": "토마토", "amount": "1", "unit": "개"},
+            {"name": "양파", "amount": "0.5", "unit": "개"},
+            {"name": "식용유", "amount": "2", "unit": "큰술"},
+        ],
         rag_context=rag_context,
         allergies=["우유"],
         cooking_tools=["프라이팬", "냄비"],
@@ -76,7 +81,12 @@ def example_recipe_detail():
     request = RecipeDetailRequest(
         recipe_name="토마토 계란볶음",
         rag_context=selected_recipe_rag,
-        available_ingredients=["계란", "양파", "식용유", "소금"],
+        available_ingredients=[
+            {"name": "계란", "amount": "2", "unit": "개"},
+            {"name": "양파", "amount": "0.5", "unit": "개"},
+            {"name": "식용유", "amount": "1", "unit": "큰술"},
+            {"name": "소금", "amount": "1", "unit": "꼬집"},
+        ],
         substitution_context=substitution_context,
         missing_ingredients=["토마토", "쪽파"],
         allergies=["우유"],
@@ -152,7 +162,13 @@ def example_recipe_followup():
         user_followup_question="이걸 2인분으로 늘리고 더 덜 짜게 만들려면 어떻게 바꿔야 해?",
         rag_context="요리명: 토마토 계란볶음\n난이도: 쉬움\n예상 조리 시간: 15분",
         substitution_context="토마토 -> 파프리카, 토마토소스\n쪽파 -> 대파, 부추",
-        available_ingredients=["계란", "양파", "식용유", "소금", "토마토소스"],
+        available_ingredients=[
+            {"name": "계란", "amount": "2", "unit": "개"},
+            {"name": "양파", "amount": "0.5", "unit": "개"},
+            {"name": "식용유", "amount": "1", "unit": "큰술"},
+            {"name": "소금", "amount": "1", "unit": "꼬집"},
+            {"name": "토마토소스", "amount": "1", "unit": "큰술"},
+        ],
         allergies=["우유"],
         selected_tools=["프라이팬"],
         cooking_history=[
