@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, Button, Dimensions, Image, ScrollView, StyleS
 import { analyzeIngredients } from '../services/geminiService';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { preprocessImage } from '../services/imagePreprocess';
+import { checkVisionAnalysisResult } from "../services/validationUtils";
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -76,13 +77,9 @@ export default function CameraScreen() {
       //전처리 적용
       const result = await analyzeIngredients(preprocessedUris);
 
-      // 전처리 미적용 - 비교 테스트용.
-      //const result = await analyzeIngredients(photoUris);
-
       // 테스트용 시간 측정 완료 - 배포시 삭제
       const endTime = Date.now();
       const duration = ((endTime - startTime) / 1000).toFixed(2);
-
       console.log(`Gemini 분석 시간: ${duration} 초`);
 
       const processedData = result.map(item => ({
@@ -90,11 +87,25 @@ export default function CameraScreen() {
         amount: isNaN(Number(item.amount)) ? item.amount : Number(item.amount)
       }));
 
-      // 팝업 및 연동 로직
-      if (processedData && processedData.length > 0) {
-        // [과자] 1개, [배추김치] 0.5포기 처럼 예쁜 텍스트 리스트 만들기
-        const itemListText = processedData.map(item => `[${item.name}] ${item.amount}${item.unit}`).join('\n');
+      const validation = checkVisionAnalysisResult(0, processedData);
 
+      if (validation.status === 'ERROR') {
+        Alert.alert('분석 오류', String(validation.message));
+        return;
+      }
+
+      if (validation.status === 'SUCCESS' && validation.extractedItems.length > 0) {
+
+        // 화면 연결 전 임시 코드.
+        console.log('--- 업데이트 예정입니다. ---');
+
+        const itemListText = validation.extractedItems.map(item => {
+          const displayName = item.isUnknown ? '알 수 없는 식재료' : item.name;
+          return `[${displayName}] ${item.amount} ${item.unit}`;
+        }).join('\n');
+
+        // 팝업 및 연동 로직
+        // [과자] 1개, [배추김치] 0.5포기 처럼 예쁜 텍스트 리스트 만들기
         Alert.alert(
           '분석 완료! 📸',
           `냉장고 보관함에 다음 식재료를 추가할까요?\n\n${itemListText}`,
@@ -104,10 +115,10 @@ export default function CameraScreen() {
               text: '추가하기',
               onPress: () => {
                 // '추가하기' 누르면 하나씩 보관함으로 전송
-                processedData.forEach(item => {
+                validation.extractedItems.forEach(item => {
                   addIngredient({
                     id: Date.now().toString() + Math.random().toString(), // 임시 고유 ID
-                    name: item.name,
+                    name: item.isUnknown ? 'Unknown' : item.name,
                     amount: item.amount,
                     unit: item.unit,
                     icon: '📦', // 임시 아이콘
@@ -122,6 +133,13 @@ export default function CameraScreen() {
             }
           ]
         );
+
+        /* 식재료 확인 및 수정 화면 완료 시 위의 임시 코드를 지우고 아래 주석 해제.
+        navigation.navigate('Screen', {
+          extractedItems: validation.extractedItems,
+          imageUri: photoUris[0]
+        });
+        */
       } else {
         Alert.alert('분석 실패', '식재료를 인식하지 못했습니다. 다시 촬영해 주세요.');
       }
