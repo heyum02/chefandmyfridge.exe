@@ -244,7 +244,7 @@ export default function RecipeScreen() {
         </View>
       </Modal>
 
-      {/* 💡 레시피 전용 챗봇 모달 */}
+      {/* 레시피 전용 챗봇 모달 */}
       <Modal animationType="slide" transparent={true} visible={chatVisible} onRequestClose={() => setChatVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.chatModalContent}>
