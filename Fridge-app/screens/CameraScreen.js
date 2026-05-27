@@ -8,6 +8,8 @@ import { ActivityIndicator, Alert, Button, Dimensions, Image, Modal, ScrollView,
 import { analyzeIngredients } from '../services/geminiService';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
+import { preprocessImage } from '../services/imagePreprocess';
+import { checkVisionAnalysisResult } from "../services/validationUtils";
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -25,7 +27,7 @@ const formatDate = (date) => {
 const calculateDaysLeft = (expiryDateStr) => {
   const target = new Date(expiryDateStr);
   const today = new Date();
-  target.setHours(0,0,0,0); today.setHours(0,0,0,0);
+  target.setHours(0, 0, 0, 0); today.setHours(0, 0, 0, 0);
   return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
 };
 
@@ -35,9 +37,9 @@ export default function CameraScreen() {
   const [photoUris, setPhotoUris] = useState([]);
   const [isCameraVisible, setIsCameraVisible] = useState(false);
   const cameraRef = useRef(null);
-  
+
   const addIngredient = useFridgeStore((state) => state.addIngredient);
-  const setChatHidden = useUserStore((state) => state.setChatHidden); 
+  const setChatHidden = useUserStore((state) => state.setChatHidden);
 
   // 💡 [새로 추가된 상태] AI 분석 결과를 담아두고 수정할 창
   const [analyzedResults, setAnalyzedResults] = useState([]);
@@ -51,7 +53,7 @@ export default function CameraScreen() {
       const shouldHide = isCameraVisible || photoUris.length > 0 || showReviewModal;
       setChatHidden(shouldHide);
       return () => setChatHidden(false);
-    }, [isCameraVisible, photoUris.length, showReviewModal]) 
+    }, [isCameraVisible, photoUris.length, showReviewModal])
   );
 
   if (!permission) return <View />;
@@ -86,7 +88,25 @@ export default function CameraScreen() {
     }
     try {
       setIsLoading(true);
-      const result = await analyzeIngredients(photoUris);
+
+      // 전처리 테스트용 시간 측정 시작 - 배포시 삭제
+      // 콘솔 로그도 배포시 삭제 예정.
+      const startTime = Date.now();
+
+      console.log('--- 이미지 전처리 시작 ---');
+      const preprocessedUris = await Promise.all(photoUris.map(async (uri) => {
+        const optimizedUri = await preprocessImage(uri);
+        return optimizedUri;
+      }));
+      console.log('--- 이미지 전처리 완료 ---');
+
+      //전처리 적용
+      const result = await analyzeIngredients(preprocessedUris);
+
+      // 테스트용 시간 측정 완료 - 배포시 삭제
+      const endTime = Date.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(2);
+      console.log(`Gemini 분석 시간: ${duration} 초`);
 
       const today = new Date();
       const defaultExpiryDate = new Date(today);
@@ -98,13 +118,20 @@ export default function CameraScreen() {
         amount: isNaN(Number(item.amount)) ? 1 : Number(item.amount),
         unit: item.unit || '개',
         // 💡 AI가 분류를 못해서 'Unknown'으로 오면 일단 그대로 둡니다. (유저가 화면에서 보고 고치게 유도)
-        category: item.category || 'Unknown', 
-        expiryDate: item.expiryDate || defaultExpiryStr, 
+        category: item.category || 'Unknown',
+        expiryDate: item.expiryDate || defaultExpiryStr,
       }));
 
-      if (processedData && processedData.length > 0) {
+      const validation = checkVisionAnalysisResult(0, processedData);
+
+      if (validation.status === 'ERROR') {
+        Alert.alert('분석 오류', String(validation.message));
+        return;
+      }
+
+      if (validation.status === 'SUCCESS' && validation.extractedItems.length > 0) {
         // 💡 [수정됨] Alert 대신 모달을 띄우고 결과값을 상태에 저장합니다!
-        setAnalyzedResults(processedData);
+        setAnalyzedResults(validation.extractedItems);
         setShowReviewModal(true);
       } else {
         Alert.alert('분석 실패', '식재료를 인식하지 못했습니다. 다시 촬영해 주세요.');
@@ -138,20 +165,22 @@ export default function CameraScreen() {
     analyzedResults.forEach(item => {
       const finalCategory = item.category === 'Unknown' ? '기타' : item.category;
       addIngredient({
-        id: Date.now().toString() + Math.random().toString(), 
+        id: Date.now().toString() + Math.random().toString(),
         name: item.name,
         amount: item.amount,
         unit: item.unit,
-        category: finalCategory, 
-        expiryDate: item.expiryDate, 
+        category: finalCategory,
+        expiryDate: item.expiryDate,
       });
     });
 
     Alert.alert('저장 완료!', '재고관리 창에서 식재료를 확인해 보세요. 🎉', [
-      { text: '확인', onPress: () => {
-        setShowReviewModal(false);
-        setPhotoUris([]);
-      }}
+      {
+        text: '확인', onPress: () => {
+          setShowReviewModal(false);
+          setPhotoUris([]);
+        }
+      }
     ]);
   };
 
@@ -159,13 +188,13 @@ export default function CameraScreen() {
     <View style={styles.container}>
       {isLoading && (
         <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
-          <ActivityIndicator size="large" color="#2ecc71" /> 
+          <ActivityIndicator size="large" color="#2ecc71" />
           <Text style={{ color: 'white', fontSize: 18, marginTop: 15, fontWeight: 'bold' }}>식재료 분석 중...</Text>
         </View>
       )}
-      
+
       {!isCameraVisible && (<View style={styles.header}><Text style={styles.headerTitle}>식재료 촬영</Text></View>)}
-      
+
       {isCameraVisible && (
         <View style={StyleSheet.absoluteFill}>
           <CameraView style={styles.camera} facing="back" ref={cameraRef}>
@@ -228,21 +257,21 @@ export default function CameraScreen() {
                   {item.category === 'Unknown' && (
                     <Text style={styles.unknownAlertText}>⚠️ 카테고리를 알 수 없습니다. 직접 선택해주세요!</Text>
                   )}
-                  
+
                   {/* 1. 이름 수정 */}
                   <Text style={styles.inputLabel}>식재료 이름</Text>
-                  <TextInput 
-                    style={styles.reviewInput} 
-                    value={item.name} 
-                    onChangeText={(text) => updateResultItem(index, 'name', text)} 
+                  <TextInput
+                    style={styles.reviewInput}
+                    value={item.name}
+                    onChangeText={(text) => updateResultItem(index, 'name', text)}
                   />
 
                   {/* 2. 카테고리 칩 선택 (Unknown 수정용) */}
                   <Text style={styles.inputLabel}>카테고리</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
                     {categories.map((cat) => (
-                      <TouchableOpacity 
-                        key={cat} 
+                      <TouchableOpacity
+                        key={cat}
                         style={[styles.reviewChip, item.category === cat && styles.activeReviewChip]}
                         onPress={() => updateResultItem(index, 'category', cat)}
                       >
@@ -271,7 +300,7 @@ export default function CameraScreen() {
                       </View>
                     </View>
                   </View>
-                  
+
                   {/* 개별 항목 삭제 버튼 */}
                   <TouchableOpacity style={styles.removeResultBtn} onPress={() => setAnalyzedResults(analyzedResults.filter((_, i) => i !== index))}>
                     <Text style={styles.removeResultText}>이 항목 빼기</Text>
