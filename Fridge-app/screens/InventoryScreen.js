@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, FlatList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFridgeStore } from '../store/useFridgeStore';
 
@@ -33,6 +33,10 @@ const formatDate = (date) => {
 
 export default function InventoryScreen() {
   const ingredients = useFridgeStore((state) => state.ingredients);
+  const fetchIngredients = useFridgeStore((state) => state.fetchIngredients);
+  useEffect(() => {
+    fetchIngredients();
+  }, []);
   const addIngredient = useFridgeStore((state) => state.addIngredient);
   const removeIngredient = useFridgeStore((state) => state.removeIngredient);
   const updateIngredient = useFridgeStore((state) => state.updateIngredient); 
