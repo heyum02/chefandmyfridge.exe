@@ -10,6 +10,8 @@ export const api = axios.create({
   baseURL: BACKEND_URL,
   headers: {
     'Content-Type': 'application/json',
+    'Bypass-Tunnel-Reminder': 'true',
+    'User-Agent': 'MyApp/1.0',
   },
 });
 
