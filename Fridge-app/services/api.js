@@ -3,7 +3,7 @@ import axios from 'axios';
 // 1. 서버 주소 설정
 // 서버를 켜면 나오는 IP 주소나 ngrok/localtunnel 주소를 여기에 넣습니다.
 // 예시: 'http://192.168.0.12:3000' 또는 'https://어쩌구저쩌구.loca.lt'
-const BACKEND_URL = 'http://여기에_진짜_서버_주소를_넣어주세요'; 
+const BACKEND_URL = 'http://125.186.175.246:3000'; 
 
 // 2. 기본 axios 인스턴스 생성
 export const api = axios.create({
