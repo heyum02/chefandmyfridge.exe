@@ -34,6 +34,22 @@ async function hasExpiryDateColumn() {
     return hasExpiryDateColumnCache;
 }
 
+async function fetchFridgeItems() {
+    const hasExpiryDate = await hasExpiryDateColumn();
+    const query = `
+        SELECT 
+            f.item_id AS id, 
+            i.name, 
+            i.category, 
+            f.quantity AS amount, 
+            f.unit, 
+            ${hasExpiryDate ? 'f.expiry_date' : 'NULL'} AS expiryDate
+        FROM fridge_items f 
+        JOIN ingredients i ON f.ingredient_id = i.ingredient_id`;
+    const [rows] = await pool.query(query);
+    return rows;
+}
+
 function runPythonJsonScript(scriptPath, payload) {
     return new Promise((resolve, reject) => {
         const python = spawn('python3', [scriptPath], {
@@ -78,18 +94,7 @@ function runPythonJsonScript(scriptPath, payload) {
 // [API 1] 냉장고 전체 재고 조회 (명세서 완벽 일치)
 app.get('/api/fridge', async (req, res) => {
     try {
-        const hasExpiryDate = await hasExpiryDateColumn();
-        const query = `
-            SELECT 
-                f.item_id AS id, 
-                i.name, 
-                i.category, 
-                f.quantity AS amount, 
-                f.unit, 
-                ${hasExpiryDate ? 'f.expiry_date' : 'NULL'} AS expiryDate
-            FROM fridge_items f 
-            JOIN ingredients i ON f.ingredient_id = i.ingredient_id`;
-        const [rows] = await pool.query(query);
+        const rows = await fetchFridgeItems();
         res.json(rows);
     } catch (err) {
         res.status(500).send("에러 발생: " + err.message);
@@ -193,11 +198,17 @@ app.delete('/api/fridge/:item_id', async (req, res) => {
 app.post('/api/recipe/recommend', async (req, res) => {
     try {
         const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'recommend_api.py');
+        const fridgeItems = await fetchFridgeItems();
+        const ingredients = fridgeItems.map((item) => ({
+            name: item.name,
+            amount: String(item.amount),
+            unit: item.unit || '',
+            note: item.expiryDate ? `expiryDate: ${item.expiryDate}` : '',
+        }));
 
-        // TODO: DB 구현 이후 재료 조회 결과로 교체 예정
-        // 현재는 요청 body의 ingredients를 무시하고 Python 내부 mock 재료를 사용함
         const payload = {
             query: req.body?.query,
+            ingredients,
             allergies: req.body?.allergies || [],
             cookingTools: req.body?.cookingTools || [],
             cookingHistory: req.body?.cookingHistory || [],

@@ -53,8 +53,16 @@ def main() -> None:
     try:
         payload = parse_request_payload()
 
-        # TODO: DB 연동 후 payload["ingredients"] 또는 DB 조회 결과로 교체
-        ingredients = MOCK_INGREDIENTS
+        ingredients = payload.get("ingredients") or []
+        mock_ingredients_used = False
+
+        if not isinstance(ingredients, list):
+            ingredients = []
+
+        if not ingredients:
+            ingredients = MOCK_INGREDIENTS
+            mock_ingredients_used = True
+
         ingredient_names = extract_ingredient_names(ingredients)
 
         db = RecipeDatabase()
@@ -88,7 +96,7 @@ def main() -> None:
             json.dumps(
                 {
                     "success": True,
-                    "mockIngredientsUsed": True,
+                    "mockIngredientsUsed": mock_ingredients_used,
                     "searchInfo": search_info,
                     "recipeCount": len(recipes),
                     "recipes": recipes,
