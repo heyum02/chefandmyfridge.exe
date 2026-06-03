@@ -43,17 +43,18 @@ export default function RecipeScreen() {
   const [rating, setRating] = useState(0); 
   const [comment, setComment] = useState(''); 
 
+  // 핵심 기능 함수들
   const handleGenerateRecipe = async () => {
-    if (isPremium) {
-    } else if (freeCount > 0) {
-      decreaseFreeCount();
-    } else {
-      setShowAdModal(true); 
-      return;
+    if (!isPremium) {
+      if (freeCount > 0) {
+        decreaseFreeCount();
+      } else {
+        setShowAdModal(true); 
+        return;
+      }
     }
 
     setIsLoading(true); 
-    
     try {
       const response = await recommendRecipeAPI({
         query: "내 냉장고 재료로 만들 수 있는 요리",
@@ -70,15 +71,10 @@ export default function RecipeScreen() {
           fetchedRecipes = response.data;
       } else if (response.data && response.data.recipes && Array.isArray(response.data.recipes)) {
           fetchedRecipes = response.data.recipes;
-      } else if (response.data && response.data.data && response.data.data.recipes && Array.isArray(response.data.data.recipes)) {
-          fetchedRecipes = response.data.data.recipes;
       }
 
       setRecipeList(fetchedRecipes);
-
-      if (fetchedRecipes.length === 0) {
-          Alert.alert("알림", "조건에 맞는 레시피를 찾지 못했거나 데이터가 비어있습니다.");
-      }
+      if (fetchedRecipes.length === 0) Alert.alert("알림", "레시피를 찾지 못했습니다.");
     } catch (error) {
       console.error(error);
       Alert.alert("통신 오류", "서버와 연결할 수 없습니다. 🥲");
@@ -90,10 +86,8 @@ export default function RecipeScreen() {
   const openRecipeDetail = async (recipe) => {
     setSelectedRecipe(recipe);
     setIsLoading(true);
-
     try {
       const recipeTitle = recipe.name || recipe.recipeName || '요리';
-
       const response = await getRecipeDetailAPI({
         recipeName: recipeTitle, 
         missingIngredients: recipe.missing_ingredients || [], 
@@ -102,23 +96,14 @@ export default function RecipeScreen() {
         cookingHistory: [], 
       });
 
-      if (response.data.success || response.data) {
+      if (response.data) {
         const detailData = response.data.data || response.data;
         setRecipeDetailData(detailData); 
-        
-        // 임시 방 번호가 아니라, 서버가 주는 '진짜 방 번호'를 확실하게 저장합니다!
-        const realSessionId = response.data.sessionId || response.data.data?.sessionId;
-
-        
-        console.log("서버가 준 방 번호:", realSessionId);
-
-        setSessionId(realSessionId); 
-        
+        setSessionId(response.data.sessionId); 
         setMessages([{ id: 1, sender: 'bot', text: `'${recipeTitle}'에 대해 궁금한 점이 있나요? 🤖` }]);
         setView('detail'); 
       }
     } catch (error) {
-      console.error(error);
       Alert.alert("통신 오류", "상세 레시피를 불러올 수 없습니다. 🥲");
     } finally {
       setIsLoading(false);
@@ -126,86 +111,63 @@ export default function RecipeScreen() {
   };
 
   const sendChatMessage = async (text) => {
-    if (!text.trim()) return; 
-    
-    // 💡 [방어막] 방 번호가 아예 없으면 챗봇이 미리 알려줍니다.
-    if (!sessionId) {
-      setMessages(prev => [...prev, { id: Date.now(), sender: 'bot', text: "대화 세션이 끊어졌습니다. 뒤로 갔다가 다시 들어와주세요! 🥲" }]);
-      return;
-    }
+    if (!text.trim() || !sessionId) return; 
 
     const newMsg = { id: Date.now(), sender: 'user', text };
     setMessages(prev => [...prev, newMsg]); 
     setChatInput('');
 
-    setMessages(prev => [...prev, { id: 'loading', sender: 'bot', text: "AI가 열심히 답변을 준비 중입니다! 🛠️" }]);
+    setMessages(prev => [...prev, { id: 'loading', sender: 'bot', text: "AI 답변 생성 중... 🛠️" }]);
 
     try {
-      const response = await sendRecipeChatAPI({
-        sessionId: sessionId,
-        message: text
-      });
+      const response = await sendRecipeChatAPI({ sessionId, message: text });
 
-      if (response.data.success || response.data) {
-        const replyText = response.data.data?.reply || response.data?.reply || "AI가 답변을 생성했습니다.";
+      if (response.data) {
+        // 💡 [수정] 서버가 주는 데이터를 찾습니다.
+        const data = response.data.data || response.data;
         
+        // 💡 [수정] reply 대신 answer_summary를 읽어옵니다!
+        let replyText = data.answer_summary || "답변을 불러오지 못했습니다.";
+        
+        // 💡 [보너스] AI가 팁(tips)을 줬다면 대답 아래에 예쁘게 추가해줍니다!
+        if (data.tips && data.tips.length > 0) {
+          replyText += "\n\n💡 꿀팁:\n- " + data.tips.join("\n- ");
+        }
+
         setMessages(prev => prev.filter(msg => msg.id !== 'loading'));
         setMessages(prev => [...prev, { id: Date.now(), sender: 'bot', text: replyText }]);
       }
     } catch (error) {
-      console.error(error);
       setMessages(prev => prev.filter(msg => msg.id !== 'loading'));
-      
-      // 💡 [수정됨] 404 에러가 떴을 때 '진짜 원인'을 말풍선에 띄워줍니다!
-      let errorMsg = "통신 오류가 발생했어요. 다시 질문해 주세요. 🥲";
-      if (error.response && error.response.status === 404) {
-          if (error.response.data && error.response.data.error) {
-              // 백엔드가 방 번호를 잃어버렸을 때 보내는 메시지
-              errorMsg = `서버 알림: ${error.response.data.error}`; 
-          } else {
-              // api.js 주소 오타일 때
-              errorMsg = "서버 주소가 잘못되었습니다. (api.js 파일을 확인해주세요!)";
-          }
-      }
-      setMessages(prev => [...prev, { id: Date.now(), sender: 'bot', text: errorMsg }]);
+      setMessages(prev => [...prev, { id: Date.now(), sender: 'bot', text: "통신 오류가 발생했습니다. 🥲" }]);
     }
   };
 
+  // 💡 [빠졌던 함수들 복구]
   const handleWatchAd = () => {
     setShowAdModal(false);
-    Alert.alert("광고 시청 완료", "보상으로 레시피 1회 이용권이 지급되었습니다!");
     addFreeCount(1);
+    Alert.alert("광고 시청 완료", "보상으로 레시피 1회 이용권이 지급되었습니다!");
   };
 
   const handleSubscribe = () => {
     setShowAdModal(false);
     setIsPremium(true);
-    Alert.alert("결제 완료 🎉", "프리미엄 회원이 되셨습니다! 무제한으로 이용해 보세요.");
+    Alert.alert("구독 완료 🎉", "프리미엄 회원이 되셨습니다!");
   };
 
   const saveRecipeRecord = (isReflectTaste) => {
-    if (rating === 0) { Alert.alert('알림', '별점을 먼저 선택해 주세요!'); return; }
-
-    if (isReflectTaste) {
-      if (feedback.spicy !== 0) updateTaste('spicy', feedback.spicy);
-      if (feedback.salty !== 0) updateTaste('salty', feedback.salty);
-      if (feedback.sweet !== 0) updateTaste('sweet', feedback.sweet);
-      if (feedback.bitter !== 0) updateTaste('bitter', feedback.bitter);
-      if (feedback.sour !== 0) updateTaste('sour', feedback.sour);
-      if (feedback.savory !== 0) updateTaste('savory', feedback.savory);
-    }
-
-    const today = new Date();
-    const dateString = `${today.getFullYear()}.${today.getMonth() + 1}.${today.getDate()}`; 
-    
-    addTriedRecipe({ id: Date.now().toString(), name: selectedRecipe?.name || selectedRecipe?.recipeName || '요리', date: dateString, rating, comment });
-
+    if (rating === 0) { Alert.alert('알림', '별점을 선택해주세요!'); return; }
+    addTriedRecipe({ 
+      id: Date.now().toString(), 
+      name: selectedRecipe?.name || selectedRecipe?.recipeName || '요리', 
+      date: new Date().toLocaleDateString(), 
+      rating, 
+      comment 
+    });
     setModalVisible(false);
-    setFeedback({ spicy: 0, salty: 0, sweet: 0, bitter: 0, sour: 0, savory: 0 });
-    setRating(0); setComment('');
-
-    Alert.alert('저장 완료 🍽️', isReflectTaste ? '별점과 피드백이 완벽하게 반영되었습니다!' : '기록에만 저장했습니다.');
     setView('list'); 
+    Alert.alert('저장 완료 🍽️');
   };
 
   const renderScale = (type, labels) => {
@@ -318,7 +280,7 @@ export default function RecipeScreen() {
                 {((recipeDetailData.steps || recipeDetailData.instructions) && (recipeDetailData.steps || recipeDetailData.instructions).length > 0) ? (
                   (recipeDetailData.steps || recipeDetailData.instructions).map((step, index) => (
                       <Text key={index} style={[styles.stepText, {marginBottom: 12}]}>
-                        <Text style={{fontWeight: 'bold', color: '#3498db'}}>{index + 1}. </Text>
+                        <Text style={{fontWeight: 'bold', color: '#3498db'}}></Text>
                         {step}
                       </Text>
                   ))

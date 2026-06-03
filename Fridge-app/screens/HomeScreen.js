@@ -1,14 +1,67 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import * as Notifications from 'expo-notifications';
+import { useEffect, useRef, useState } from 'react'; // 💡 [수정] useRef 추가!
 import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 💡 냉장고 보관함 불러오기!
+import { useIsFocused } from '@react-navigation/native';
+
 import { useFridgeStore } from '../store/useFridgeStore';
-// 💡 유저 보관함 불러오기! (따라해본 레시피 데이터)
 import { useUserStore } from '../store/useUserStore';
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
 export default function HomeScreen() {
+  const isFocused = useIsFocused();
   const ingredients = useFridgeStore((state) => state.ingredients);
+  
+  // 💡 [핵심] 앱을 켜고 팝업을 한 번 띄웠는지 기억하는 '메모장'입니다. 처음엔 false(안 띄움)로 시작합니다.
+  const hasShownAlert = useRef(false);
+  
+  useEffect(() => {
+    if (!isFocused) return;
+
+    const checkExpiryAndNotify = () => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const urgentItems = (ingredients || []).filter(item => {
+        if (!item.expiryDate) return false;
+        
+        const expDate = new Date(item.expiryDate);
+        expDate.setHours(0, 0, 0, 0); 
+
+        const diffTime = expDate.getTime() - today.getTime();
+        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)); 
+        
+        return diffDays >= 0 && diffDays <= 3; 
+      });
+
+      // 💡 [방어막] 긴급한 식재료가 있고 && 메모장에 아직 팝업 안 띄웠다고(false) 적혀있을 때만 실행!
+      if (urgentItems.length > 0 && !hasShownAlert.current) {
+        const itemNames = urgentItems.map(i => i.name).join(', ');
+        
+        Alert.alert(
+          "🚨 소비기한 임박 알림!",
+          `${itemNames}의 소비기한이 3일 이내로 남았습니다. 서둘러 요리해 드세요! 👨‍🍳`,
+          [{ text: "확인", style: "default" }]
+        );
+
+        // 💡 팝업을 띄웠으니 메모장에 '띄웠음(true)'으로 도장을 꽝! 찍어둡니다.
+        hasShownAlert.current = true;
+      }
+    };
+
+    if (ingredients && ingredients.length > 0) {
+      checkExpiryAndNotify();
+    }
+  }, [ingredients, isFocused]); 
+
   const savedItemCount = ingredients.length;
   const ecoScore = savedItemCount * 10;
 
@@ -24,7 +77,6 @@ export default function HomeScreen() {
   const [editRating, setEditRating] = useState(0);
   const [editComment, setEditComment] = useState('');
 
-  // 💡 방어막 1: 텅 빈(null) 데이터는 애초에 거르고(filter) 정렬합니다!
   const getSortedRecipes = () => {
     let copied = [...triedRecipes].filter(recipe => recipe !== null && recipe !== undefined); 
     
@@ -52,7 +104,6 @@ export default function HomeScreen() {
     ]);
   };
 
-  // 💡 방어막 2: 선택된 레시피가 확실히 있을 때만 데이터를 세팅합니다.
   const handleEditStart = () => {
     if (!selectedRecipe) return;
     setEditRating(selectedRecipe?.rating || 0);
@@ -73,12 +124,10 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* 상단 헤더 */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>마이 냉장고 홈</Text>
       </View>
 
-      {/* 1. 에코 대시보드 카드 */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>🌱 이번 달 에코 리포트</Text>
         <Text style={styles.cardSubtitle}>버려질 뻔한 식재료를 훌륭하게 구출했어요!</Text>
@@ -96,11 +145,9 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* 2. 요리 기록 카드 */}
       <View style={styles.card}>
         <View style={styles.recipeCardHeader}>
           <Text style={styles.cardTitle}>🍳 따라해본 레시피</Text>
-          
           <View style={styles.sortGroup}>
             <TouchableOpacity onPress={() => setSortType('recent')}>
               <Text style={[styles.sortText, sortType === 'recent' && styles.sortTextActive]}>최신</Text>
@@ -120,9 +167,7 @@ export default function HomeScreen() {
            <Text style={styles.emptyText}>아직 저장된 요리 기록이 없습니다.</Text>
         ) : (
           sortedRecipes.map((recipe) => {
-            // 💡 방어막 3: 혹시라도 null 값이 렌더링되려 하면 무시!
             if (!recipe) return null; 
-
             return (
               <TouchableOpacity 
                 key={recipe.id} 
@@ -134,7 +179,6 @@ export default function HomeScreen() {
                 }}
               >
                 <View style={styles.recipeHeader}>
-                  {/* 💡 ?. (Optional Chaining)을 써서 값이 없을 때 뻗는 것을 방지 */}
                   <Text style={styles.recipeName}>{recipe?.name || '알 수 없는 요리'}</Text>
                   <Text style={styles.recipeDate}>{recipe?.date || ''}</Text>
                 </View>
@@ -146,7 +190,6 @@ export default function HomeScreen() {
                   <Text style={styles.ratingText}>{(recipe?.rating || 0).toFixed(1)}</Text>
                 </View>
                 
-                {/* 💡 방어막 4: 코멘트가 '존재할 때만' 박스를 렌더링하도록 조건 강화 */}
                 {recipe?.comment ? (
                   <View style={styles.commentBox}>
                     <Text style={styles.commentText} numberOfLines={1}>"{recipe.comment}"</Text>
@@ -158,11 +201,9 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {/* 요리 기록 상세 보기 & 수정 모달창 */}
       <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {/* 💡 방어막 5: selectedRecipe가 있을 때만 모달창 내부를 그립니다 */}
             {selectedRecipe && (
               <>
                 <View style={styles.modalHeader}>
@@ -175,7 +216,6 @@ export default function HomeScreen() {
                 <Text style={styles.modalTitle}>{selectedRecipe?.name}</Text>
 
                 {!isEditing ? (
-                  // [보기 모드]
                   <>
                     <View style={styles.modalRatingRow}>
                       {[1, 2, 3, 4, 5].map((star) => (
@@ -204,7 +244,6 @@ export default function HomeScreen() {
                     </View>
                   </>
                 ) : (
-                  // [수정 모드]
                   <>
                     <View style={styles.modalRatingRow}>
                       {[1, 2, 3, 4, 5].map((star) => (
@@ -241,7 +280,6 @@ export default function HomeScreen() {
   );
 }
 
-// styles는 변함없이 그대로 유지됩니다!
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f6fa' },
   header: { padding: 20, paddingTop: 60, backgroundColor: '#fff' },
