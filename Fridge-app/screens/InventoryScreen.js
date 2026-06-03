@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Platform, ScrollView, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFridgeStore } from '../store/useFridgeStore';
 
 const getCategoryIcon = (category) => {
@@ -17,8 +17,9 @@ const calculateDday = (dateString) => {
   const today = new Date();
   target.setHours(0, 0, 0, 0);
   today.setHours(0, 0, 0, 0);
-  const diffTime = target - today;
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const diffTime = target.getTime() - today.getTime();
+  // 💡 [수정됨] 홈 화면과 동일하게 시간 오차 방지를 위해 round(반올림) 적용!
+  return Math.round(diffTime / (1000 * 60 * 60 * 24)); 
 };
 
 const formatDate = (date) => {
@@ -43,12 +44,10 @@ export default function InventoryScreen() {
   const removeIngredient = useFridgeStore((state) => state.removeIngredient);
   const updateIngredient = useFridgeStore((state) => state.updateIngredient);
 
-  // 💡 메인 모달 상태 관리 (추가 및 수정 공용)
   const [modalVisible, setModalVisible] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false); // 수정 모드인지 확인
-  const [editingId, setEditingId] = useState(null); // 수정 중인 아이템 ID
+  const [isEditMode, setIsEditMode] = useState(false); 
+  const [editingId, setEditingId] = useState(null); 
 
-  // 💡 입력폼 상태 관리
   const [inputText, setInputText] = useState('');
   const [amount, setAmount] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState('기타');
@@ -63,7 +62,25 @@ export default function InventoryScreen() {
     return dDayA - dDayB;
   });
 
-  // 💡 새 식재료 추가 창 열기
+  // 💡 [추가됨] 데이터를 임박한 재료와 안전한 재료 두 그룹으로 쪼갭니다!
+  const urgentItems = sortedIngredients.filter(item => {
+    const dDay = calculateDday(item.expiryDate);
+    return dDay !== null && dDay <= 3;
+  });
+
+  const safeItems = sortedIngredients.filter(item => {
+    const dDay = calculateDday(item.expiryDate);
+    return dDay === null || dDay > 3;
+  });
+
+  const sections = [];
+  if (urgentItems.length > 0) {
+    sections.push({ title: '🚨 유통기한 임박 (3일 이내)', data: urgentItems, isUrgent: true });
+  }
+  if (safeItems.length > 0) {
+    sections.push({ title: '✅ 보관 중인 식재료', data: safeItems, isUrgent: false });
+  }
+
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingId(null);
@@ -74,7 +91,6 @@ export default function InventoryScreen() {
     setModalVisible(true);
   };
 
-  // 💡 기존 식재료 수정 창 열기 (항목 클릭 시 실행)
   const openEditModal = (item) => {
     setIsEditMode(true);
     setEditingId(item.id);
@@ -88,9 +104,8 @@ export default function InventoryScreen() {
     setModalVisible(true);
   };
 
-  const handleAmountChange = (value, setter, state) => { setter(Math.max(1, state + value)); }; // 수량이 1 밑으로 안 내려가게 방어!
+  const handleAmountChange = (value, setter, state) => { setter(Math.max(1, state + value)); }; 
 
-  // 💡 추가 또는 수정 완료 버튼을 눌렀을 때
   const handleSubmit = () => {
     if (inputText.trim() === '') { Alert.alert('알림', '식재료 이름을 입력해주세요!'); return; }
     
@@ -99,7 +114,6 @@ export default function InventoryScreen() {
     const formattedDate = formatDate(today);
 
     if (isEditMode) {
-      // 수정 모드일 때
       updateIngredient(editingId, { 
         name: inputText, 
         amount: amount, 
@@ -107,7 +121,6 @@ export default function InventoryScreen() {
         expiryDate: formattedDate 
       });
     } else {
-      // 새롭게 추가할 때
       const newItem = { 
         id: Date.now().toString(), 
         name: inputText, 
@@ -131,7 +144,6 @@ export default function InventoryScreen() {
       <View style={styles.card}>
         <Text style={styles.icon}>{getCategoryIcon(item.category)}</Text>
         
-        {/* 💡 식재료 이름과 카테고리 부분을 누르면 전체 수정 창이 열리도록 변경했습니다! */}
         <TouchableOpacity style={styles.infoContainer} onPress={() => openEditModal(item)}>
           <Text style={styles.name}>{item.name}</Text>
           <Text style={styles.categoryText}>{item.category} (터치하여 수정)</Text>
@@ -164,16 +176,23 @@ export default function InventoryScreen() {
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={sortedIngredients}
+      {/* 💡 [수정됨] FlatList 대신 그룹 렌더링이 가능한 SectionList로 교체했습니다. */}
+      <SectionList
+        sections={sections}
         keyExtractor={(item, index) => item?.id ? String(item.id) : String(index)}
         renderItem={renderItem}
+        renderSectionHeader={({ section }) => (
+          <View style={[styles.sectionHeader, section.isUrgent && styles.sectionHeaderUrgent]}>
+            <Text style={[styles.sectionHeaderText, section.isUrgent && styles.sectionHeaderTextUrgent]}>
+              {section.title}
+            </Text>
+          </View>
+        )}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={<View style={styles.emptyContainer}><Text style={styles.emptyText}>냉장고가 텅 비었어요!{'\n'}위에 버튼을 눌러 재료를 추가해보세요.</Text></View>}
       />
 
-      {/* 💡 공용 입력 모달 (추가 / 수정 둘 다 사용) */}
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -226,7 +245,14 @@ const styles = StyleSheet.create({
   topActionContainer: { padding: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
   openModalButton: { flexDirection: 'row', backgroundColor: '#2ecc71', paddingVertical: 12, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   openModalButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  listContainer: { padding: 15 },
+  listContainer: { padding: 15, paddingBottom: 40 },
+  
+  // 💡 [추가됨] 섹션 리스트 헤더 타이틀 스타일
+  sectionHeader: { paddingVertical: 12, paddingHorizontal: 5, marginBottom: 10, marginTop: 10, borderBottomWidth: 2, borderBottomColor: '#eee' },
+  sectionHeaderUrgent: { borderBottomColor: '#ff7675' },
+  sectionHeaderText: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
+  sectionHeaderTextUrgent: { color: '#d63031' },
+
   card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 15, borderRadius: 15, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   icon: { fontSize: 35, marginRight: 15 },
   infoContainer: { flex: 1 },
@@ -259,4 +285,4 @@ const styles = StyleSheet.create({
   closeBtnText: { color: '#95a5a6', fontSize: 16, fontWeight: 'bold' },
   submitBtn: { flex: 0.7, backgroundColor: '#2ecc71', padding: 15, borderRadius: 12, alignItems: 'center' },
   submitBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
-});
+}); 
