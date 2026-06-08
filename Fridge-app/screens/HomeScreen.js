@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
-import { useEffect, useRef, useState } from 'react'; // 💡 [수정] useRef 추가!
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { useIsFocused } from '@react-navigation/native';
 
+// 기록 수정 및 삭제 API 가져오기
+import { deleteHistoryAPI, updateHistoryAPI } from '../services/api';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
@@ -19,10 +21,9 @@ Notifications.setNotificationHandler({
 export default function HomeScreen() {
   const isFocused = useIsFocused();
   const ingredients = useFridgeStore((state) => state.ingredients);
-  
-  // 💡 [핵심] 앱을 켜고 팝업을 한 번 띄웠는지 기억하는 '메모장'입니다. 처음엔 false(안 띄움)로 시작합니다.
+
   const hasShownAlert = useRef(false);
-  
+
   useEffect(() => {
     if (!isFocused) return;
 
@@ -32,27 +33,25 @@ export default function HomeScreen() {
 
       const urgentItems = (ingredients || []).filter(item => {
         if (!item.expiryDate) return false;
-        
+
         const expDate = new Date(item.expiryDate);
-        expDate.setHours(0, 0, 0, 0); 
+        expDate.setHours(0, 0, 0, 0);
 
         const diffTime = expDate.getTime() - today.getTime();
-        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)); 
-        
-        return diffDays >= 0 && diffDays <= 3; 
+        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+        return diffDays >= 0 && diffDays <= 3;
       });
 
-      // 💡 [방어막] 긴급한 식재료가 있고 && 메모장에 아직 팝업 안 띄웠다고(false) 적혀있을 때만 실행!
       if (urgentItems.length > 0 && !hasShownAlert.current) {
         const itemNames = urgentItems.map(i => i.name).join(', ');
-        
+
         Alert.alert(
           "🚨 소비기한 임박 알림!",
           `${itemNames}의 소비기한이 3일 이내로 남았습니다. 서둘러 요리해 드세요! 👨‍🍳`,
           [{ text: "확인", style: "default" }]
         );
 
-        // 💡 팝업을 띄웠으니 메모장에 '띄웠음(true)'으로 도장을 꽝! 찍어둡니다.
         hasShownAlert.current = true;
       }
     };
@@ -60,15 +59,15 @@ export default function HomeScreen() {
     if (ingredients && ingredients.length > 0) {
       checkExpiryAndNotify();
     }
-  }, [ingredients, isFocused]); 
+  }, [ingredients, isFocused]);
 
   const savedItemCount = ingredients.length;
   const ecoScore = savedItemCount * 10;
 
   const triedRecipes = useUserStore((state) => state.triedRecipes);
-  const deleteTriedRecipe = useUserStore((state) => state.deleteTriedRecipe); 
-  const editTriedRecipe = useUserStore((state) => state.editTriedRecipe); 
-  const [sortType, setSortType] = useState('recent'); 
+  const deleteTriedRecipe = useUserStore((state) => state.deleteTriedRecipe);
+  const editTriedRecipe = useUserStore((state) => state.editTriedRecipe);
+  const [sortType, setSortType] = useState('recent');
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
@@ -78,29 +77,37 @@ export default function HomeScreen() {
   const [editComment, setEditComment] = useState('');
 
   const getSortedRecipes = () => {
-    let copied = [...triedRecipes].filter(recipe => recipe !== null && recipe !== undefined); 
-    
+    let copied = [...triedRecipes].filter(recipe => recipe !== null && recipe !== undefined);
+
     if (sortType === 'recent') {
-      return copied.sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0)); 
+      return copied.sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
     } else if (sortType === 'oldest') {
-      return copied.sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0)); 
+      return copied.sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0));
     } else if (sortType === 'ratingHigh') {
-      return copied.sort((a, b) => (b?.rating || 0) - (a?.rating || 0)); 
+      return copied.sort((a, b) => (b?.rating || 0) - (a?.rating || 0));
     } else if (sortType === 'ratingLow') {
-      return copied.sort((a, b) => (a?.rating || 0) - (b?.rating || 0)); 
+      return copied.sort((a, b) => (a?.rating || 0) - (b?.rating || 0));
     }
     return copied;
   };
 
   const sortedRecipes = getSortedRecipes();
 
+  // 서버에 기록 삭제 요청
   const handleDelete = (id) => {
     Alert.alert('기록 삭제', '이 요리 기록을 정말 지우시겠습니까?', [
       { text: '취소', style: 'cancel' },
-      { text: '삭제', style: 'destructive', onPress: () => {
-          deleteTriedRecipe(id);
-          setModalVisible(false);
-      }}
+      {
+        text: '삭제', style: 'destructive', onPress: async () => {
+          try {
+            await deleteHistoryAPI(id); // 백엔드 지우기
+            deleteTriedRecipe(id); // 내 폰에서 지우기
+            setModalVisible(false);
+          } catch (error) {
+            Alert.alert('오류', '서버에서 삭제하지 못했습니다.');
+          }
+        }
+      }
     ]);
   };
 
@@ -111,15 +118,22 @@ export default function HomeScreen() {
     setIsEditing(true);
   };
 
-  const handleEditSave = () => {
+  // 서버에 기록 수정 요청
+  const handleEditSave = async () => {
     if (editRating === 0) {
       Alert.alert('알림', '별점을 선택해 주세요!');
       return;
     }
-    editTriedRecipe(selectedRecipe?.id, { rating: editRating, comment: editComment });
-    setSelectedRecipe({ ...selectedRecipe, rating: editRating, comment: editComment });
-    setIsEditing(false);
-    Alert.alert('수정 완료', '기록이 성공적으로 수정되었습니다.');
+    try {
+      await updateHistoryAPI(selectedRecipe?.id, { rating: editRating, comment: editComment }); // 백엔드 수정
+
+      editTriedRecipe(selectedRecipe?.id, { rating: editRating, comment: editComment }); // 내 폰 수정
+      setSelectedRecipe({ ...selectedRecipe, rating: editRating, comment: editComment });
+      setIsEditing(false);
+      Alert.alert('수정 완료', '기록이 성공적으로 수정되었습니다.');
+    } catch (error) {
+      Alert.alert('오류', '서버에 수정 사항을 저장하지 못했습니다.');
+    }
   };
 
   return (
@@ -131,7 +145,7 @@ export default function HomeScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>🌱 이번 달 에코 리포트</Text>
         <Text style={styles.cardSubtitle}>버려질 뻔한 식재료를 훌륭하게 구출했어요!</Text>
-        
+
         <View style={styles.ecoRow}>
           <View style={styles.ecoBox}>
             <Text style={styles.ecoLabel}>구출한 식재료</Text>
@@ -162,19 +176,19 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        
+
         {sortedRecipes.length === 0 ? (
-           <Text style={styles.emptyText}>아직 저장된 요리 기록이 없습니다.</Text>
+          <Text style={styles.emptyText}>아직 저장된 요리 기록이 없습니다.</Text>
         ) : (
           sortedRecipes.map((recipe) => {
-            if (!recipe) return null; 
+            if (!recipe) return null;
             return (
-              <TouchableOpacity 
-                key={recipe.id} 
+              <TouchableOpacity
+                key={recipe.id}
                 style={styles.recipeItem}
                 onPress={() => {
                   setSelectedRecipe(recipe);
-                  setIsEditing(false); 
+                  setIsEditing(false);
                   setModalVisible(true);
                 }}
               >
@@ -182,14 +196,14 @@ export default function HomeScreen() {
                   <Text style={styles.recipeName}>{recipe?.name || '알 수 없는 요리'}</Text>
                   <Text style={styles.recipeDate}>{recipe?.date || ''}</Text>
                 </View>
-                
+
                 <View style={styles.ratingRow}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <Ionicons key={star} name={star <= (recipe?.rating || 0) ? "star" : "star-outline"} size={18} color="#f1c40f" />
                   ))}
                   <Text style={styles.ratingText}>{(recipe?.rating || 0).toFixed(1)}</Text>
                 </View>
-                
+
                 {recipe?.comment ? (
                   <View style={styles.commentBox}>
                     <Text style={styles.commentText} numberOfLines={1}>"{recipe.comment}"</Text>
@@ -253,9 +267,9 @@ export default function HomeScreen() {
                       ))}
                     </View>
 
-                    <TextInput 
-                      style={styles.editCommentInput} 
-                      placeholder="간단한 코멘트를 남겨보세요!" 
+                    <TextInput
+                      style={styles.editCommentInput}
+                      placeholder="간단한 코멘트를 남겨보세요!"
                       value={editComment}
                       onChangeText={setEditComment}
                       maxLength={30}
@@ -286,7 +300,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50' },
   card: { backgroundColor: '#fff', margin: 15, padding: 20, borderRadius: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
   recipeCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' }, 
+  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
   cardSubtitle: { fontSize: 13, color: '#7f8c8d', marginBottom: 20 },
   ecoRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#f8fdf9', padding: 15, borderRadius: 12 },
   ecoBox: { alignItems: 'center' },

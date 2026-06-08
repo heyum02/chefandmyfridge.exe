@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+// 프로필 업데이트 API 가져오기
+import { updateProfileAPI } from '../services/api';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
-// 💡 주방도구 카테고리 동기화
 const toolCategories = {
   "🔥 가열 기구": ["가스레인지", "인덕션", "오븐", "전자레인지", "에어프라이어", "밥솥", "전기팬", "전기밥솥", "토치"],
   "🍳 팬/냄비": ["냄비", "프라이팬", "주물팬", "달걀말이팬", "오븐팬", "베이킹팬", "머핀팬", "와플팬", "쿠킹팬"],
@@ -19,7 +21,7 @@ export default function MyPageScreen({ onLogout }) {
   const email = useUserStore((state) => state.email);
   const clearUser = useUserStore((state) => state.clearUser);
   const ingredients = useFridgeStore((state) => state.ingredients);
-  const clearFridge = useFridgeStore((state) => state.clearFridge); 
+  const clearFridge = useFridgeStore((state) => state.clearFridge);
   const userProfile = useUserStore((state) => state.userProfile);
   const updateFullProfile = useUserStore((state) => state.updateFullProfile);
 
@@ -29,15 +31,15 @@ export default function MyPageScreen({ onLogout }) {
   const [tempTastes, setTempTastes] = useState({ spicy: 3, salty: 3, sweet: 3, bitter: 3, sour: 3, savory: 3 });
 
   const handleLogout = () => {
-    clearUser();   
-    clearFridge(); 
-    onLogout();    
+    clearUser();
+    clearFridge();
+    onLogout();
   };
 
   const openProfileModal = () => {
-    setTempAllergies(userProfile.allergies);
-    setTempTools(userProfile.kitchenTools);
-    setTempTastes({ 
+    setTempAllergies(userProfile.allergies || []);
+    setTempTools(userProfile.kitchenTools || []);
+    setTempTastes({
       spicy: userProfile.tastes?.spicy || 3, salty: userProfile.tastes?.salty || 3, sweet: userProfile.tastes?.sweet || 3,
       bitter: userProfile.tastes?.bitter || 3, sour: userProfile.tastes?.sour || 3, savory: userProfile.tastes?.savory || 3,
     });
@@ -49,11 +51,24 @@ export default function MyPageScreen({ onLogout }) {
     else setList([...list, item]);
   };
 
-  const handleSaveProfile = () => {
-    updateFullProfile({ allergies: tempAllergies, kitchenTools: tempTools, tastes: tempTastes });
-    setModalVisible(false);
-    if(Platform.OS === 'web') window.alert('업데이트 완료\n맞춤 설정이 안전하게 변경되었습니다!');
-    else Alert.alert('업데이트 완료', '맞춤 설정이 안전하게 변경되었습니다!');
+  // 서버로 바뀐 설정을 보냄
+  const handleSaveProfile = async () => {
+    try {
+      await updateProfileAPI({
+        allergies: tempAllergies,
+        kitchenTools: tempTools,
+        tastes: tempTastes
+      });
+
+      updateFullProfile({ allergies: tempAllergies, kitchenTools: tempTools, tastes: tempTastes });
+      setModalVisible(false);
+
+      if (Platform.OS === 'web') window.alert('업데이트 완료\n맞춤 설정이 안전하게 변경되었습니다!');
+      else Alert.alert('업데이트 완료', '맞춤 설정이 안전하게 변경되었습니다!');
+    } catch (error) {
+      console.error(error);
+      Alert.alert('통신 오류', '서버에 설정을 저장하지 못했습니다.');
+    }
   };
 
   const allergyOptions = ['난류', '우유', '땅콩', '대두', '밀', '생선', '갑각류'];
@@ -81,7 +96,7 @@ export default function MyPageScreen({ onLogout }) {
         <View style={styles.avatar}><Ionicons name="person" size={40} color="#bdc3c7" /></View>
         <View style={styles.profileInfo}>
           <Text style={styles.userName}>{nickname} 님</Text>
-          <Text style={styles.userEmail}>{email}</Text> 
+          <Text style={styles.userEmail}>{email}</Text>
         </View>
       </View>
       <View style={styles.statsCard}>
@@ -121,8 +136,7 @@ export default function MyPageScreen({ onLogout }) {
                   </TouchableOpacity>
                 ))}
               </View>
-              
-              {/* 💡 주방 도구 카테고리화 렌더링 */}
+
               <Text style={styles.sectionSubtitle}>🍳 주방 도구</Text>
               {Object.entries(toolCategories).map(([categoryName, tools]) => (
                 <View key={categoryName} style={{ marginBottom: 15 }}>

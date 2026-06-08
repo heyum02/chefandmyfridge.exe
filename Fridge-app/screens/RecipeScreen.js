@@ -1,17 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { getRecipeDetailAPI, recommendRecipeAPI, sendRecipeChatAPI } from '../services/api';
+
+// 요리 기록 API 추가
+import { getRecipeDetailAPI, recommendRecipeAPI, sendRecipeChatAPI, addHistoryAPI } from '../services/api';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
 export default function RecipeScreen() {
   const ingredients = useFridgeStore((state) => state.ingredients);
-  const userProfile = useUserStore((state) => state.userProfile); 
-  
-  const updateTaste = useUserStore((state) => state.updateTaste);
+  const userProfile = useUserStore((state) => state.userProfile);
+
   const addTriedRecipe = useUserStore((state) => state.addTriedRecipe);
-  
+
   const isPremium = useUserStore((state) => state.isPremium);
   const freeCount = useUserStore((state) => state.freeCount);
   const setIsPremium = useUserStore((state) => state.setIsPremium);
@@ -19,20 +20,19 @@ export default function RecipeScreen() {
   const addFreeCount = useUserStore((state) => state.addFreeCount);
 
   const [view, setView] = useState('list');
-  const [selectedRecipe, setSelectedRecipe] = useState(null); 
-  const [recipeDetailData, setRecipeDetailData] = useState(null); 
+  const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [recipeDetailData, setRecipeDetailData] = useState(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
-  
   const [recipeList, setRecipeList] = useState([]);
 
   const categories = ['✨ 추천', '⏱️ 초스피드'];
   const [selectedCategory, setSelectedCategory] = useState(categories[0]);
-  
+
   const [showAdModal, setShowAdModal] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false); 
-  
+  const [modalVisible, setModalVisible] = useState(false);
+
   const [chatVisible, setChatVisible] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setMessages] = useState([
@@ -40,37 +40,56 @@ export default function RecipeScreen() {
   ]);
 
   const [feedback, setFeedback] = useState({ spicy: 0, salty: 0, sweet: 0, bitter: 0, sour: 0, savory: 0 });
-  const [rating, setRating] = useState(0); 
-  const [comment, setComment] = useState(''); 
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
 
-  // 핵심 기능 함수들
-  const handleGenerateRecipe = async () => {
+  // 냉장고에서 유통기한이 3일 이내로 남은 재료만 골라냄
+  const urgentItems = (ingredients || []).filter(item => {
+    if (!item.expiryDate) return false;
+    const expDate = new Date(item.expiryDate);
+    const today = new Date();
+    expDate.setHours(0, 0, 0, 0); today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 3;
+  });
+
+  // 일반 추천과 임박 추천을 나누는 함수
+  const handleGenerateRecipe = async (isUrgent = false) => {
     if (!isPremium) {
       if (freeCount > 0) {
         decreaseFreeCount();
       } else {
-        setShowAdModal(true); 
+        setShowAdModal(true);
         return;
       }
     }
 
-    setIsLoading(true); 
+    // AI에게 보낼 명령(Query) 세팅
+    let finalQuery = "내 냉장고 재료로 만들 수 있는 요리";
+
+    // 만약 유저가 '임박 식재료 파기' 버튼을 눌렀다면
+    if (isUrgent) {
+      const urgentNames = urgentItems.map(i => i.name).join(', ');
+      finalQuery = `유통기한이 3일 이내로 남은 [${urgentNames}]를 무조건 최우선으로 다량 소비할 수 있는 레시피를 추천해 줘.`;
+    }
+
+    setIsLoading(true);
     try {
       const response = await recommendRecipeAPI({
-        query: "내 냉장고 재료로 만들 수 있는 요리",
+        query: finalQuery,
         allergies: userProfile.allergies || [],
         cookingTools: userProfile.kitchenTools || [],
-        cookingHistory: [], 
+        cookingHistory: [],
         maxResults: 3
       });
 
       let fetchedRecipes = [];
       if (response.data && response.data.data && Array.isArray(response.data.data)) {
-          fetchedRecipes = response.data.data;
+        fetchedRecipes = response.data.data;
       } else if (response.data && Array.isArray(response.data)) {
-          fetchedRecipes = response.data;
+        fetchedRecipes = response.data;
       } else if (response.data && response.data.recipes && Array.isArray(response.data.recipes)) {
-          fetchedRecipes = response.data.recipes;
+        fetchedRecipes = response.data.recipes;
       }
 
       setRecipeList(fetchedRecipes);
@@ -79,7 +98,7 @@ export default function RecipeScreen() {
       console.error(error);
       Alert.alert("통신 오류", "서버와 연결할 수 없습니다. 🥲");
     } finally {
-      setIsLoading(false); 
+      setIsLoading(false);
     }
   };
 
@@ -89,19 +108,19 @@ export default function RecipeScreen() {
     try {
       const recipeTitle = recipe.name || recipe.recipeName || '요리';
       const response = await getRecipeDetailAPI({
-        recipeName: recipeTitle, 
-        missingIngredients: recipe.missing_ingredients || [], 
+        recipeName: recipeTitle,
+        missingIngredients: recipe.missing_ingredients || [],
         allergies: userProfile.allergies || [],
         selectedTools: userProfile.kitchenTools || [],
-        cookingHistory: [], 
+        cookingHistory: [],
       });
 
       if (response.data) {
         const detailData = response.data.data || response.data;
-        setRecipeDetailData(detailData); 
-        setSessionId(response.data.sessionId); 
+        setRecipeDetailData(detailData);
+        setSessionId(response.data.sessionId);
         setMessages([{ id: 1, sender: 'bot', text: `'${recipeTitle}'에 대해 궁금한 점이 있나요? 🤖` }]);
-        setView('detail'); 
+        setView('detail');
       }
     } catch (error) {
       Alert.alert("통신 오류", "상세 레시피를 불러올 수 없습니다. 🥲");
@@ -111,10 +130,10 @@ export default function RecipeScreen() {
   };
 
   const sendChatMessage = async (text) => {
-    if (!text.trim() || !sessionId) return; 
+    if (!text.trim() || !sessionId) return;
 
     const newMsg = { id: Date.now(), sender: 'user', text };
-    setMessages(prev => [...prev, newMsg]); 
+    setMessages(prev => [...prev, newMsg]);
     setChatInput('');
 
     setMessages(prev => [...prev, { id: 'loading', sender: 'bot', text: "AI 답변 생성 중... 🛠️" }]);
@@ -123,13 +142,9 @@ export default function RecipeScreen() {
       const response = await sendRecipeChatAPI({ sessionId, message: text });
 
       if (response.data) {
-        // 💡 [수정] 서버가 주는 데이터를 찾습니다.
         const data = response.data.data || response.data;
-        
-        // 💡 [수정] reply 대신 answer_summary를 읽어옵니다!
         let replyText = data.answer_summary || "답변을 불러오지 못했습니다.";
-        
-        // 💡 [보너스] AI가 팁(tips)을 줬다면 대답 아래에 예쁘게 추가해줍니다!
+
         if (data.tips && data.tips.length > 0) {
           replyText += "\n\n💡 꿀팁:\n- " + data.tips.join("\n- ");
         }
@@ -143,7 +158,6 @@ export default function RecipeScreen() {
     }
   };
 
-  // 💡 [빠졌던 함수들 복구]
   const handleWatchAd = () => {
     setShowAdModal(false);
     addFreeCount(1);
@@ -156,22 +170,42 @@ export default function RecipeScreen() {
     Alert.alert("구독 완료 🎉", "프리미엄 회원이 되셨습니다!");
   };
 
-  const saveRecipeRecord = (isReflectTaste) => {
+  // 별점과 피드백을 서버 DB에 영구 저장합니다
+  const saveRecipeRecord = async (isReflectTaste) => {
     if (rating === 0) { Alert.alert('알림', '별점을 선택해주세요!'); return; }
-    addTriedRecipe({ 
-      id: Date.now().toString(), 
-      name: selectedRecipe?.name || selectedRecipe?.recipeName || '요리', 
-      date: new Date().toLocaleDateString(), 
-      rating, 
-      comment 
-    });
-    setModalVisible(false);
-    setView('list'); 
-    Alert.alert('저장 완료 🍽️');
+
+    const recipeTitle = selectedRecipe?.name || selectedRecipe?.recipeName || '요리';
+
+    try {
+      // 1. 서버 API 호출 (DB에 저장)
+      await addHistoryAPI({
+        name: recipeTitle,
+        date: new Date().toLocaleDateString(),
+        rating: rating,
+        comment: comment,
+        tasteFeedback: isReflectTaste ? feedback : null
+      });
+
+      // 2. 내 폰 화면에도 보여주기 위해 스토어에 추가
+      addTriedRecipe({
+        id: Date.now().toString(),
+        name: recipeTitle,
+        date: new Date().toLocaleDateString(),
+        rating,
+        comment
+      });
+
+      setModalVisible(false);
+      setView('list');
+      Alert.alert('저장 완료 🍽️', '요리 기록이 서버에 안전하게 저장되었습니다!');
+    } catch (error) {
+      console.error(error);
+      Alert.alert('저장 실패', '서버 통신 중 오류가 발생했습니다. 다시 시도해주세요.');
+    }
   };
 
   const renderScale = (type, labels) => {
-    const values = [-2, -1, 0, 1, 2]; 
+    const values = [-2, -1, 0, 1, 2];
     return (
       <View style={styles.scaleGroup}>
         {values.map((val, idx) => (
@@ -200,17 +234,22 @@ export default function RecipeScreen() {
             {isPremium ? (
               <Text style={styles.premiumText}>👑 프리미엄 회원 (무제한 이용 중)</Text>
             ) : (
-              <Text style={styles.freeText}>남은 무료 횟수: <Text style={{fontWeight: 'bold'}}>{freeCount}회</Text></Text>
+              <Text style={styles.freeText}>남은 무료 횟수: <Text style={{ fontWeight: 'bold' }}>{freeCount}회</Text></Text>
             )}
           </View>
-          <TouchableOpacity style={styles.mainGenerateButton} onPress={handleGenerateRecipe} disabled={isLoading}>
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.mainGenerateButtonText}>내 냉장고로 새 레시피 생성하기</Text>
-            )}
+
+          {/* 기존 일반 추천 버튼 */}
+          <TouchableOpacity style={styles.mainGenerateButton} onPress={() => handleGenerateRecipe(false)} disabled={isLoading}>
+            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.mainGenerateButtonText}>내 냉장고로 새 레시피 생성하기</Text>}
           </TouchableOpacity>
-          
+
+          {/* 임박 식재료 처리 버튼 (임박한 식재료가 1개라도 있을 때만 뜹니다) */}
+          {urgentItems.length > 0 && (
+            <TouchableOpacity style={styles.urgentGenerateButton} onPress={() => handleGenerateRecipe(true)} disabled={isLoading}>
+              {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.urgentGenerateButtonText}>유통기한 임박 식재료 ({urgentItems.length}개) 처리 레시피 추천</Text>}
+            </TouchableOpacity>
+          )}
+
           <View style={styles.categoryContainer}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {categories.map((cat, index) => (
@@ -223,9 +262,9 @@ export default function RecipeScreen() {
 
           <ScrollView showsVerticalScrollIndicator={false} style={{ paddingHorizontal: 15 }}>
             <Text style={styles.listTitle}>요리 목록</Text>
-            
+
             {recipeList.length === 0 && !isLoading && (
-               <Text style={{textAlign: 'center', marginTop: 30, color: '#95a5a6'}}>버튼을 눌러 레시피를 추천받아 보세요!</Text>
+              <Text style={{ textAlign: 'center', marginTop: 30, color: '#95a5a6' }}>버튼을 눌러 레시피를 추천받아 보세요!</Text>
             )}
 
             {(recipeList || []).map((recipe, index) => (
@@ -249,7 +288,7 @@ export default function RecipeScreen() {
             <View style={styles.recipeCard}>
               <View style={styles.badge}><Text style={styles.badgeText}>✨ AI 맞춤 추천</Text></View>
               <Text style={styles.recipeTitle}>{recipeDetailData.name || recipeDetailData.recipeName || selectedRecipe?.name}</Text>
-              
+
               {selectedRecipe?.reason && (
                 <View style={styles.reasonBox}>
                   <Text style={styles.reasonText}>💬 "{selectedRecipe.reason}"</Text>
@@ -279,10 +318,10 @@ export default function RecipeScreen() {
                 <Text style={styles.sectionTitle}>👨‍🍳 AI 맞춤 조리 순서</Text>
                 {((recipeDetailData.steps || recipeDetailData.instructions) && (recipeDetailData.steps || recipeDetailData.instructions).length > 0) ? (
                   (recipeDetailData.steps || recipeDetailData.instructions).map((step, index) => (
-                      <Text key={index} style={[styles.stepText, {marginBottom: 12}]}>
-                        <Text style={{fontWeight: 'bold', color: '#3498db'}}></Text>
-                        {step}
-                      </Text>
+                    <Text key={index} style={[styles.stepText, { marginBottom: 12 }]}>
+                      <Text style={{ fontWeight: 'bold', color: '#3498db' }}></Text>
+                      {step}
+                    </Text>
                   ))
                 ) : (
                   <Text style={styles.stepText}>조리 순서를 불러오는 중이거나 데이터가 없습니다.</Text>
@@ -303,7 +342,6 @@ export default function RecipeScreen() {
         </View>
       )}
 
-      {/* 💡 [수정됨] 챗봇 모달에 키보드 회피(KeyboardAvoidingView) 적용 */}
       <Modal animationType="slide" transparent={true} visible={chatVisible} onRequestClose={() => setChatVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
           <View style={styles.modalOverlay}>
@@ -320,7 +358,7 @@ export default function RecipeScreen() {
                 ))}
               </ScrollView>
               <View style={styles.chatInputRow}>
-                <TextInput style={styles.chatInputBox} placeholder="질문을 자유롭게 입력하세요..." value={chatInput} onChangeText={setChatInput} onSubmitEditing={() => sendChatMessage(chatInput)}/>
+                <TextInput style={styles.chatInputBox} placeholder="질문을 자유롭게 입력하세요..." value={chatInput} onChangeText={setChatInput} onSubmitEditing={() => sendChatMessage(chatInput)} />
                 <TouchableOpacity style={styles.chatSendBtn} onPress={() => sendChatMessage(chatInput)}><Ionicons name="send" size={20} color="white" /></TouchableOpacity>
               </View>
             </View>
@@ -368,7 +406,7 @@ export default function RecipeScreen() {
             <Text style={styles.adModalDesc}>광고를 보고 1회 더 이용하거나,{'\n'}프리미엄 구독으로 무제한 이용해 보세요!</Text>
             <TouchableOpacity style={styles.adWatchButton} onPress={handleWatchAd}><Ionicons name="play-circle-outline" size={20} color="#fff" /><Text style={styles.adButtonText}> 광고 보고 1회 무료 이용하기</Text></TouchableOpacity>
             <TouchableOpacity style={styles.premiumSubscribeButton} onPress={handleSubscribe}><Ionicons name="star" size={20} color="#fff" /><Text style={styles.adButtonText}> 월 3,990원 무제한 구독하기</Text></TouchableOpacity>
-            <TouchableOpacity style={{marginTop: 15}} onPress={() => setShowAdModal(false)}><Text style={{color: '#7f8c8d', textDecorationLine: 'underline'}}>다음에 할게요</Text></TouchableOpacity>
+            <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setShowAdModal(false)}><Text style={{ color: '#7f8c8d', textDecorationLine: 'underline' }}>다음에 할게요</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -381,12 +419,16 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f6fa' },
   header: { flexDirection: 'row', alignItems: 'center', padding: 20, paddingTop: 60, backgroundColor: '#fff', paddingBottom: 15 },
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#2c3e50' },
-  
+
   statusBox: { padding: 12, backgroundColor: '#f1f2f6', borderRadius: 10, alignItems: 'center', marginHorizontal: 15, marginBottom: 8 },
   freeText: { fontSize: 14, color: '#2c3e50' },
   premiumText: { fontSize: 14, color: '#e67e22', fontWeight: 'bold' },
   mainGenerateButton: { backgroundColor: '#3498db', padding: 14, borderRadius: 12, alignItems: 'center', marginHorizontal: 15, marginBottom: 15, height: 50, justifyContent: 'center' },
   mainGenerateButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
+  // 💡 [신규 추가] 임박 식재료 추천 버튼 스타일
+  urgentGenerateButton: { backgroundColor: '#e74c3c', padding: 14, borderRadius: 12, alignItems: 'center', marginHorizontal: 15, marginBottom: 15, height: 50, justifyContent: 'center' },
+  urgentGenerateButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 
   listTitle: { fontSize: 18, fontWeight: 'bold', color: '#34495e', marginBottom: 10, marginTop: 10 },
   recipeListItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: 18, borderRadius: 12, marginBottom: 10, elevation: 1 },
@@ -398,12 +440,12 @@ const styles = StyleSheet.create({
   categoryBadgeActive: { backgroundColor: '#2ecc71' },
   categoryText: { color: '#7f8c8d', fontWeight: '600' },
   categoryTextActive: { color: '#fff' },
-  
+
   recipeCard: { backgroundColor: '#fff', margin: 15, padding: 20, borderRadius: 15, elevation: 2 },
   badge: { alignSelf: 'flex-start', backgroundColor: '#e8f8f5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, marginBottom: 10 },
   badgeText: { color: '#1abc9c', fontWeight: 'bold', fontSize: 12 },
   recipeTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 15, color: '#2c3e50' },
-  
+
   reasonBox: { backgroundColor: '#f8f9fa', padding: 15, borderRadius: 10, marginBottom: 25 },
   reasonText: { fontSize: 14, color: '#34495e', fontStyle: 'italic', lineHeight: 20 },
   infoSection: { marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#f1f2f6' },
@@ -412,13 +454,13 @@ const styles = StyleSheet.create({
   stepSection: { marginBottom: 20 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#34495e', marginBottom: 10 },
   stepText: { fontSize: 15, color: '#34495e', marginBottom: 8, lineHeight: 24 },
-  
+
   bottomButtonContainer: { padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#f1f2f6' },
   cookButton: { backgroundColor: '#2ecc71', padding: 15, borderRadius: 12, alignItems: 'center' },
   cookButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  
+
   chatFab: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#3498db', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 8, zIndex: 100 },
-  
+
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
   chatModalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '80%', backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, paddingBottom: 30 },
   chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 15, marginBottom: 15 },
