@@ -450,6 +450,53 @@ app.delete('/api/recipe/history/:id', async (req, res) => {
     }
 });
 
+// ==========================================
+// [추가 피드백 API] 재고 차감 및 즐겨찾기
+// ==========================================
+
+// [API 15] 요리 후 재고 자동 차감
+app.post('/api/fridge/deduct', async (req, res) => {
+    // 프론트에서 [{ id: 1, usedAmount: 2 }, { id: 3, usedAmount: 1 }] 형태로 배열을 보낸다고 가정
+    const { items } = req.body;
+
+    if (!items || !Array.isArray(items)) {
+        return res.status(400).json({ error: "차감할 식재료 데이터가 올바르지 않습니다." });
+    }
+
+    try {
+        // 배열을 돌면서 각각의 식재료 수량을 깎음
+        for (let item of items) {
+            const sql = 'UPDATE fridge_items SET quantity = quantity - ? WHERE item_id = ?';
+            await pool.query(sql, [item.usedAmount, item.id]);
+        }
+
+        // (센스 옵션!) 수량이 0 이하가 된 다 쓴 식재료는 냉장고에서 자동 삭제
+        await pool.query('DELETE FROM fridge_items WHERE quantity <= 0');
+
+        res.json({ message: "사용한 식재료만큼 재고가 차감되었습니다." });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "재고 차감 중 오류가 발생했습니다." });
+    }
+});
+
+// [API 16] 레시피 즐겨찾기 ON/OFF
+app.put('/api/recipe/history/:id/bookmark', async (req, res) => {
+    const { id } = req.params; // 요리 기록(feedback) ID
+    const { isBookmark } = req.body; // true(즐겨찾기 켬) 또는 false(끔)
+
+    try {
+        const sql = 'UPDATE user_feedback SET is_bookmark = ? WHERE feedback_id = ?';
+        // boolean 값(true/false)을 DB에 넣기 위해 1 또는 0으로 변환
+        await pool.query(sql, [isBookmark ? 1 : 0, id]);
+
+        res.json({ message: `레시피 즐겨찾기가 ${isBookmark ? '설정' : '해제'}되었습니다.` });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "즐겨찾기 업데이트 중 오류가 발생했습니다." });
+    }
+});
+
 // 배포 확인용 간단한 헬스 체크
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
