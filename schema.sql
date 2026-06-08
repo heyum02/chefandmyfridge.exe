@@ -49,6 +49,7 @@ CREATE TABLE user_feedback (
     rating INT,                  -- 별점
     comment TEXT,                -- 코멘트
     taste_feedback TEXT,         -- 명세서의 tasteFeedback (6단계 입맛 피드백)
+    is_bookmark TINYINT(1) DEFAULT 0, -- ⭐ [영균님 요청] 즐겨찾기 여부 (0=안함, 1=즐겨찾기)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user_profile(user_id)
 );
