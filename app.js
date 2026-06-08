@@ -34,22 +34,6 @@ async function hasExpiryDateColumn() {
     return hasExpiryDateColumnCache;
 }
 
-async function fetchFridgeItems() {
-    const hasExpiryDate = await hasExpiryDateColumn();
-    const query = `
-        SELECT 
-            f.item_id AS id, 
-            i.name, 
-            i.category, 
-            f.quantity AS amount, 
-            f.unit, 
-            ${hasExpiryDate ? 'f.expiry_date' : 'NULL'} AS expiryDate
-        FROM fridge_items f 
-        JOIN ingredients i ON f.ingredient_id = i.ingredient_id`;
-    const [rows] = await pool.query(query);
-    return rows;
-}
-
 function runPythonJsonScript(scriptPath, payload) {
     return new Promise((resolve, reject) => {
         const python = spawn('python3', [scriptPath], {
@@ -94,7 +78,18 @@ function runPythonJsonScript(scriptPath, payload) {
 // [API 1] 냉장고 전체 재고 조회 (명세서 완벽 일치)
 app.get('/api/fridge', async (req, res) => {
     try {
-        const rows = await fetchFridgeItems();
+        const hasExpiryDate = await hasExpiryDateColumn();
+        const query = `
+            SELECT 
+                f.item_id AS id, 
+                i.name, 
+                i.category, 
+                f.quantity AS amount, 
+                f.unit, 
+                ${hasExpiryDate ? 'f.expiry_date' : 'NULL'} AS expiryDate
+            FROM fridge_items f 
+            JOIN ingredients i ON f.ingredient_id = i.ingredient_id`;
+        const [rows] = await pool.query(query);
         res.json(rows);
     } catch (err) {
         res.status(500).send("에러 발생: " + err.message);
@@ -198,17 +193,11 @@ app.delete('/api/fridge/:item_id', async (req, res) => {
 app.post('/api/recipe/recommend', async (req, res) => {
     try {
         const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'recommend_api.py');
-        const fridgeItems = await fetchFridgeItems();
-        const ingredients = fridgeItems.map((item) => ({
-            name: item.name,
-            amount: String(item.amount),
-            unit: item.unit || '',
-            note: item.expiryDate ? `expiryDate: ${item.expiryDate}` : '',
-        }));
 
+        // TODO: DB 구현 이후 재료 조회 결과로 교체 예정
+        // 현재는 요청 body의 ingredients를 무시하고 Python 내부 mock 재료를 사용함
         const payload = {
             query: req.body?.query,
-            ingredients,
             allergies: req.body?.allergies || [],
             cookingTools: req.body?.cookingTools || [],
             cookingHistory: req.body?.cookingHistory || [],
@@ -347,6 +336,117 @@ app.post('/api/recipe/chat', async (req, res) => {
             error: '레시피 후속 대화 API 실행 중 오류가 발생했습니다.',
             detail: err.message,
         });
+    }
+});
+
+// ==========================================
+// [도메인 3] 유저 인증 및 마이페이지 (Option C)
+// ==========================================
+
+// [API 9] 회원가입 (명세서 일치)
+app.post('/api/auth/signup', async (req, res) => {
+    const { email, nickname, password, allergies, kitchenTools, tastes } = req.body;
+    try {
+        const sql = `INSERT INTO user_profile (email, password, nickname, allergies, kitchen_tools, preferred_ingredients)
+                     VALUES (?, ?, ?, ?, ?, ?)`;
+        
+        // 배열 데이터는 텍스트(JSON)로 변환해서 저장
+        await pool.query(sql, [email, password, nickname, JSON.stringify(allergies), JSON.stringify(kitchenTools), JSON.stringify(tastes)]);
+        
+        res.json({ message: "이메일과 맞춤 설정 데이터를 받아 회원가입을 처리했습니다." });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "회원가입 중 오류가 발생했습니다. (이미 가입된 이메일일 수 있습니다.)" });
+    }
+});
+
+// [API 10] 로그인 (명세서 일치)
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const [users] = await pool.query('SELECT * FROM user_profile WHERE email = ? AND password = ?', [email, password]);
+
+        if (users.length === 0) {
+            return res.status(401).json({ error: "이메일이나 비밀번호가 일치하지 않습니다." });
+        }
+
+        const user = users[0];
+        // 프론트엔드가 요구하는 데이터 형태 그대로 반환
+        res.json({
+            token: "dummy-token-for-capstone", // 테스트용 임시 토큰
+            nickname: user.nickname,
+            isPremium: false,
+            freeCount: 5,
+            allergies: JSON.parse(user.allergies || '[]'),
+            kitchenTools: JSON.parse(user.kitchen_tools || '[]'),
+            tastes: JSON.parse(user.preferred_ingredients || '[]')
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "로그인 처리 중 오류가 발생했습니다." });
+    }
+});
+
+// [API 11] 마이페이지 맞춤 설정 변경 (명세서 일치)
+app.put('/api/user/profile', async (req, res) => {
+    const { allergies, kitchenTools, tastes } = req.body;
+    try {
+        // 테스트용으로 1번 유저의 설정을 업데이트
+        const sql = 'UPDATE user_profile SET allergies = ?, kitchen_tools = ?, preferred_ingredients = ? WHERE user_id = 1';
+        await pool.query(sql, [JSON.stringify(allergies), JSON.stringify(kitchenTools), JSON.stringify(tastes)]);
+        
+        res.json({ message: "마이페이지에서 내 입맛 및 주방 설정을 수정했습니다." });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "프로필 수정 중 오류가 발생했습니다." });
+    }
+});
+
+// ==========================================
+// [도메인 4] 요리 완료 기록 및 피드백 (Option C)
+// ==========================================
+
+// [API 12] 요리 완료 기록 저장 (명세서 일치)
+app.post('/api/recipe/history', async (req, res) => {
+    const { name, date, rating, comment, tasteFeedback } = req.body;
+    try {
+        const sql = 'INSERT INTO user_feedback (user_id, recipe_name, rating, comment, taste_feedback) VALUES (?, ?, ?, ?, ?)';
+        // tasteFeedback은 객체 형태이므로 텍스트(JSON)로 변환
+        await pool.query(sql, [1, name, rating, comment, JSON.stringify(tasteFeedback)]);
+        
+        res.json({ message: "홈 화면용 요리 기록 및 6단계 입맛 피드백을 저장했습니다." });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "요리 기록 저장 중 오류가 발생했습니다." });
+    }
+});
+
+// [API 13] 요리 기록 수정 (명세서 일치)
+app.put('/api/recipe/history/:id', async (req, res) => {
+    const { id } = req.params;
+    const { rating, comment } = req.body;
+    try {
+        const sql = 'UPDATE user_feedback SET rating = ?, comment = ? WHERE feedback_id = ?';
+        await pool.query(sql, [rating, comment, id]);
+        
+        res.json({ message: "홈 화면에 저장된 요리 기록(별점, 코멘트)을 수정했습니다." });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "요리 기록 수정 중 오류가 발생했습니다." });
+    }
+});
+
+// [API 14] 요리 기록 삭제 (명세서 일치)
+app.delete('/api/recipe/history/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const sql = 'DELETE FROM user_feedback WHERE feedback_id = ?';
+        await pool.query(sql, [id]);
+        
+        res.json({ message: "홈 화면에 저장된 요리 기록을 삭제했습니다." });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "요리 기록 삭제 중 오류가 발생했습니다." });
     }
 });
 
