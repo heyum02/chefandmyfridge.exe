@@ -13,13 +13,12 @@ from chat_module import ChatGPTModule
 from prompt import PromptGenerator, RecipeRecommendationRequest
 from recipe_rag import RecipeDatabase
 
-
-MOCK_INGREDIENTS: List[Dict[str, str]] = [
-    {"name": "계란", "amount": "2", "unit": "개"},
-    {"name": "토마토", "amount": "1", "unit": "개"},
-    {"name": "양파", "amount": "0.5", "unit": "개"},
-    {"name": "식용유", "amount": "2", "unit": "큰술"},
-]
+IGNORED_MISSING_INGREDIENT_KEYWORDS = {
+    "물",
+    "정수",
+    "생수",
+    "얼음물",
+}
 
 
 def parse_request_payload() -> Dict[str, Any]:
@@ -49,19 +48,41 @@ def parse_model_json(response_text: str) -> Dict[str, Any]:
     return json.loads(cleaned)
 
 
+def should_ignore_missing_ingredient(name: str) -> bool:
+    normalized = (name or "").strip().lower().replace(" ", "")
+    return any(keyword in normalized for keyword in IGNORED_MISSING_INGREDIENT_KEYWORDS)
+
+
+def normalize_recipe(recipe: Dict[str, Any]) -> Dict[str, Any]:
+    missing_ingredients = recipe.get("missing_ingredients", [])
+    insufficient_ingredients = recipe.get("insufficient_ingredients", [])
+
+    if isinstance(missing_ingredients, list):
+        recipe["missing_ingredients"] = [
+            ingredient
+            for ingredient in missing_ingredients
+            if not should_ignore_missing_ingredient(str(ingredient))
+        ]
+
+    if isinstance(insufficient_ingredients, list):
+        recipe["insufficient_ingredients"] = [
+            ingredient
+            for ingredient in insufficient_ingredients
+            if not should_ignore_missing_ingredient(str(ingredient))
+        ]
+
+    recipe["missing_ingredient_count"] = len(recipe.get("missing_ingredients", []))
+    return recipe
+
+
 def main() -> None:
     try:
         payload = parse_request_payload()
 
         ingredients = payload.get("ingredients") or []
-        mock_ingredients_used = False
 
         if not isinstance(ingredients, list):
             ingredients = []
-
-        if not ingredients:
-            ingredients = MOCK_INGREDIENTS
-            mock_ingredients_used = True
 
         ingredient_names = extract_ingredient_names(ingredients)
 
@@ -90,13 +111,14 @@ def main() -> None:
             system_message=system_message,
         )
         response_json = parse_model_json(response_text)
-        recipes = response_json.get("recipes", [])
+        recipes = [normalize_recipe(recipe) for recipe in response_json.get("recipes", [])]
+        response_json["recipes"] = recipes
 
         print(
             json.dumps(
                 {
                     "success": True,
-                    "mockIngredientsUsed": mock_ingredients_used,
+                    "mockIngredientsUsed": False,
                     "searchInfo": search_info,
                     "recipeCount": len(recipes),
                     "recipes": recipes,
