@@ -15,14 +15,6 @@ from chat_module import ChatGPTModule
 from prompt import PromptGenerator, RecipeDetailRequest
 from recipe_rag import RecipeDatabase
 
-
-MOCK_INGREDIENTS: List[Dict[str, str]] = [
-    {"name": "계란", "amount": "2", "unit": "개"},
-    {"name": "양파", "amount": "0.5", "unit": "개"},
-    {"name": "식용유", "amount": "1", "unit": "큰술"},
-    {"name": "소금", "amount": "1", "unit": "꼬집"},
-]
-
 DEFAULT_RECIPE_NAME = "토마토 계란볶음"
 DEFAULT_MISSING_INGREDIENTS = ["토마토", "쪽파"]
 SUBSTITUTION_PATH = Path(__file__).resolve().parent.parent / "recipe" / "data" / "substitution_network.json"
@@ -74,8 +66,9 @@ def main() -> None:
 
         recipe_name = payload.get("recipeName", DEFAULT_RECIPE_NAME)
 
-        # TODO: DB 연동 후 payload["ingredients"] 또는 DB 조회 결과로 교체
-        available_ingredients = MOCK_INGREDIENTS
+        available_ingredients = payload.get("ingredients") or []
+        if not isinstance(available_ingredients, list):
+            available_ingredients = []
         ingredient_names = extract_ingredient_names(available_ingredients)
 
         db = RecipeDatabase()
@@ -118,7 +111,7 @@ def main() -> None:
             json.dumps(
                 {
                     "success": True,
-                    "mockIngredientsUsed": True,
+                    "mockIngredientsUsed": False,
                     "searchInfo": search_info,
                     "sessionContext": {
                         "recipeName": recipe_name,

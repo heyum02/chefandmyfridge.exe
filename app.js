@@ -34,6 +34,22 @@ async function hasExpiryDateColumn() {
     return hasExpiryDateColumnCache;
 }
 
+async function getFridgeIngredients(userId = 1) {
+    const query = `
+        SELECT
+            i.name,
+            i.category,
+            CAST(f.quantity AS CHAR) AS amount,
+            COALESCE(f.unit, '') AS unit
+        FROM fridge_items f
+        JOIN ingredients i ON f.ingredient_id = i.ingredient_id
+        WHERE f.user_id = ?
+        ORDER BY f.added_at DESC, f.item_id DESC
+    `;
+    const [rows] = await pool.query(query, [userId]);
+    return rows;
+}
+
 function runPythonJsonScript(scriptPath, payload) {
     return new Promise((resolve, reject) => {
         const python = spawn('python3', [scriptPath], {
@@ -193,10 +209,11 @@ app.delete('/api/fridge/:item_id', async (req, res) => {
 app.post('/api/recipe/recommend', async (req, res) => {
     try {
         const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'recommend_api.py');
+        const userId = Number(req.body?.userId) || 1;
+        const fridgeIngredients = await getFridgeIngredients(userId);
 
-        // TODO: DB 구현 이후 재료 조회 결과로 교체 예정
-        // 현재는 요청 body의 ingredients를 무시하고 Python 내부 mock 재료를 사용함
         const payload = {
+            ingredients: fridgeIngredients,
             query: req.body?.query,
             allergies: req.body?.allergies || [],
             cookingTools: req.body?.cookingTools || [],
@@ -225,11 +242,12 @@ app.post('/api/recipe/recommend', async (req, res) => {
 app.post('/api/recipe/detail', async (req, res) => {
     try {
         const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'detail_api.py');
+        const userId = Number(req.body?.userId) || 1;
+        const fridgeIngredients = await getFridgeIngredients(userId);
 
-        // TODO: DB 구현 이후 재료 조회 결과로 교체 예정
-        // 현재는 요청 body의 ingredients를 무시하고 Python 내부 mock 재료를 사용함
         const payload = {
             recipeName: req.body?.recipeName,
+            ingredients: fridgeIngredients,
             missingIngredients: req.body?.missingIngredients || [],
             allergies: req.body?.allergies || [],
             selectedTools: req.body?.selectedTools || req.body?.cookingTools || [],
@@ -322,7 +340,6 @@ app.post('/api/recipe/chat', async (req, res) => {
             { role: 'user', content: message },
             { role: 'assistant', content: JSON.stringify(result.data) },
         ];
-        session.previousRecipeResponse = JSON.stringify(result.data);
         recipeChatSessions.set(sessionId, session);
 
         res.json({
