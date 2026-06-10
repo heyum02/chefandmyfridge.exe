@@ -87,6 +87,7 @@ def main() -> None:
             recipe_name=recipe_name,
             rag_context=rag_context,
             available_ingredients=available_ingredients,
+            servings=max(1, int(payload.get("servings", 1) or 1)),
             substitution_context=substitution_context,
             missing_ingredients=missing_ingredients,
             allergies=payload.get("allergies", []),
@@ -115,6 +116,7 @@ def main() -> None:
                     "searchInfo": search_info,
                     "sessionContext": {
                         "recipeName": recipe_name,
+                        "servings": request.servings,
                         "previousRecipeResponse": json.dumps(response_json, ensure_ascii=False),
                         "ragContext": rag_context,
                         "substitutionContext": substitution_context,

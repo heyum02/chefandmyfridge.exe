@@ -16,6 +16,8 @@ class RecipeRecommendationRequest:
 
     ingredients: List[IngredientInput]
     rag_context: str
+    servings: int = 1
+    user_prompt: str = ""
     allergies: List[str] = field(default_factory=list)
     cooking_tools: List[str] = field(default_factory=list)
     cooking_history: List[str] = field(default_factory=list)
@@ -29,6 +31,7 @@ class RecipeDetailRequest:
     recipe_name: str
     rag_context: str
     available_ingredients: List[IngredientInput]
+    servings: int = 1
     substitution_context: Optional[str] = None
     missing_ingredients: List[str] = field(default_factory=list)
     allergies: List[str] = field(default_factory=list)
@@ -48,6 +51,7 @@ class RecipeFollowUpRequest:
     rag_context: Optional[str] = None
     substitution_context: Optional[str] = None
     available_ingredients: List[IngredientInput] = field(default_factory=list)
+    servings: int = 1
     allergies: List[str] = field(default_factory=list)
     selected_tools: List[str] = field(default_factory=list)
     cooking_history: List[str] = field(default_factory=list)
@@ -120,6 +124,8 @@ class PromptGenerator:
         cooking_tools = request.cooking_tools
         cooking_history = request.cooking_history
         max_results = request.max_results
+        servings = max(1, request.servings or 1)
+        extra_user_prompt = request.user_prompt.strip()
 
         system_message = """당신은 RAG 기반 레시피 추천 전문가입니다.
 반드시 제공된 RAG 컨텍스트(원본: LLM/recipe/data/recipes_dedup.json 검색 결과) 안에서만 레시피를 추천하세요.
@@ -135,15 +141,22 @@ class PromptGenerator:
 7. 사용자의 이전 요리 기록을 참고해 너무 비슷한 요리만 반복 추천하지 말고 적절히 다양성을 반영합니다.
 8. 난이도와 예상 조리 시간을 반드시 포함합니다.
 9. 물, 정수, 생수처럼 일반적으로 집에 있다고 가정 가능한 기본 재료는 missing_ingredients나 insufficient_ingredients에 넣지 마세요.
+10. 검색 결과 안에서는 현재 보유 재료와 많이 일치하는 레시피를 우선 배치하세요.
+11. 추천 순서는 ingredient_match_count가 높은 순서를 우선으로 하고, 동률이면 missing_ingredient_count가 적은 순서를 우선합니다.
+12. 사용자가 별도 요청(user_prompt)으로 특정 재료를 우선 사용해달라고 하면 그 재료를 더 우선 반영합니다.
 
 응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
 
         user_parts = [
             "다음 조건을 바탕으로 RAG 레시피 후보에서 만들 수 있는 요리 목록을 추천해줘.",
             f"현재 보유 재료: {PromptGenerator._format_ingredients(ingredients)}",
+            f"희망 인분 수: {servings}인분",
             f"최대 추천 개수: {max_results}",
             "부족한 재료 또는 양이 부족한 재료는 레시피당 최대 2개까지 허용",
         ]
+
+        if extra_user_prompt:
+            user_parts.append(f"사용자 추가 요청: {extra_user_prompt}")
 
         if allergies:
             user_parts.append(f"사용자 알레르기 정보: {', '.join(allergies)}")
@@ -165,8 +178,10 @@ class PromptGenerator:
       "name": "요리명",
       "difficulty": "쉬움/보통/어려움",
       "estimated_time_minutes": 20,
+      "servings": 2,
       "available_ingredients": ["가지고 있는 재료1", "가지고 있는 재료2"],
       "available_ingredients_detail": ["계란 2개", "양파 1/2개"],
+      "ingredient_match_count": 2,
       "insufficient_ingredients": ["토마토(양 부족)"],
       "missing_ingredients": ["없는 재료1"],
       "missing_ingredient_count": 1,
@@ -177,11 +192,13 @@ class PromptGenerator:
 }
 
 중요:
+- recipes 배열은 재료 일치 수가 많은 순으로 정렬
+- ingredient_match_count는 available_ingredients 길이와 일치하도록 숫자로 작성
 - missing_ingredient_count는 반드시 숫자로 작성
 - insufficient_ingredients에는 양이 부족한 재료만 포함
 - missing_ingredients는 최대 2개까지만 포함
 - 물, 정수, 생수 같은 기본 재료는 missing_ingredients와 insufficient_ingredients에서 제외
-- recipes 배열은 추천 우선순위 순서대로 정렬
+- servings는 사용자가 요청한 인분 수를 반영
 - 조건에 맞는 요리가 없으면 {"recipes": []} 로 응답
 """.strip()
         )
@@ -218,11 +235,13 @@ class PromptGenerator:
 7. tips는 반드시 이번 사용자 추가 질문에 직접 관련된 팁만 작성합니다.
 8. 이전 답변에서 나온 tips를 반복 재사용하지 마세요.
 9. 현재 질문에 맞는 새로운 팁이 없으면 tips는 빈 배열로 출력하세요.
+10. 이미 정해진 인분 수가 있으면 그 인분 기준을 계속 유지하세요.
 
 응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
 
         user_parts = [
             f"선택한 요리: {request.recipe_name}",
+            f"현재 기준 인분 수: {max(1, request.servings or 1)}인분",
             f"사용자 추가 질문: {request.user_followup_question}",
             "\n직전 레시피 상세 응답:",
             request.previous_recipe_response,
@@ -347,11 +366,13 @@ class PromptGenerator:
 13. 조리 단계는 너무 크게 묶지 말고, 재료 손질/예열/볶기/끓이기/간 맞추기/마무리를 구분해 작성합니다.
 14. "적당히", "알아서", "대충" 같은 표현은 피하고 가능한 범위에서 구체적으로 설명합니다.
 15. RAG 근거가 부족한 경우에도 instructions를 한두 줄로 끝내지 말고, 일반적인 조리 상식 범위에서 보완해 충분히 설명합니다.
+16. 사용자가 요청한 인분 수에 맞춰 재료량과 조리 흐름을 설명합니다.
 
 응답은 반드시 JSON으로만 출력하세요. 설명 문장, 코드블록 마크다운은 넣지 마세요."""
 
         user_parts = [
             f"선택한 요리: {recipe_name}",
+            f"요청 인분 수: {max(1, request.servings or 1)}인분",
             f"현재 보유 재료: {PromptGenerator._format_ingredients(available_ingredients)}",
             "\n선택된 레시피 RAG 정보:",
             rag_context,
@@ -392,7 +413,8 @@ class PromptGenerator:
     "name": "요리명",
     "summary": "요리 한줄 설명",
     "difficulty": "쉬움/보통/어려움",
-    "estimated_time_minutes": 20
+    "estimated_time_minutes": 20,
+    "servings": 2
   },
   "ingredients": {
     "original": ["원래 재료1", "원래 재료2"],
@@ -439,6 +461,7 @@ class PromptGenerator:
 - instructions는 최소 6단계 이상 작성하고, 가능하면 각 단계를 한 문장 이상으로 충분히 설명
 - 각 instruction에는 가능하면 시간, 불 세기, 재료 상태 변화, 실패 방지 포인트를 포함
 - instructions만 읽어도 사용자가 별도 검색 없이 요리를 진행할 수 있어야 함
+- recipe.servings는 요청 인분 수를 반영
 - nutrition은 final_used 기준으로 계산/추정
 - recipe_name과 일치하는 레시피만 설명
 """.strip()
