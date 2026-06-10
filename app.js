@@ -211,10 +211,13 @@ app.post('/api/recipe/recommend', async (req, res) => {
         const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'recommend_api.py');
         const userId = Number(req.body?.userId) || 1;
         const fridgeIngredients = await getFridgeIngredients(userId);
+        const servings = Math.max(1, Number(req.body?.servings) || 1);
 
         const payload = {
             ingredients: fridgeIngredients,
             query: req.body?.query,
+            userPrompt: req.body?.user_prompt || req.body?.userPrompt || '',
+            servings,
             allergies: req.body?.allergies || [],
             cookingTools: req.body?.cookingTools || [],
             cookingHistory: req.body?.cookingHistory || [],
@@ -244,10 +247,12 @@ app.post('/api/recipe/detail', async (req, res) => {
         const scriptPath = path.join(__dirname, 'LLM', 'prompt', 'detail_api.py');
         const userId = Number(req.body?.userId) || 1;
         const fridgeIngredients = await getFridgeIngredients(userId);
+        const servings = Math.max(1, Number(req.body?.servings) || 1);
 
         const payload = {
             recipeName: req.body?.recipeName,
             ingredients: fridgeIngredients,
+            servings,
             missingIngredients: req.body?.missingIngredients || [],
             allergies: req.body?.allergies || [],
             selectedTools: req.body?.selectedTools || req.body?.cookingTools || [],
@@ -323,6 +328,7 @@ app.post('/api/recipe/chat', async (req, res) => {
             ragContext: session.ragContext,
             substitutionContext: session.substitutionContext,
             availableIngredients: session.availableIngredients || [],
+            servings: session.servings || 1,
             allergies: session.allergies || [],
             selectedTools: session.selectedTools || [],
             cookingHistory: session.cookingHistory || [],

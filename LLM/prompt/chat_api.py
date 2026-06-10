@@ -45,6 +45,7 @@ def main() -> None:
             rag_context=payload.get("ragContext"),
             substitution_context=payload.get("substitutionContext"),
             available_ingredients=payload.get("availableIngredients", []),
+            servings=max(1, int(payload.get("servings", 1) or 1)),
             allergies=payload.get("allergies", []),
             selected_tools=payload.get("selectedTools", []),
             cooking_history=payload.get("cookingHistory", []),
