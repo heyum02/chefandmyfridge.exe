@@ -39,13 +39,17 @@ export default function SignUpScreen({ onGoToLogin }) {
     if (password !== confirmPassword) { setErrorMessage('비밀번호가 서로 일치하지 않습니다.'); return; }
 
     try {
+      // [방어 코드] 혹시라도 이상한 값이 섞일까 봐 안전하게 한 번 더 필터링
+      const safeAllergies = selectedAllergies.filter(item => item !== null && item !== undefined);
+      const safeTools = selectedTools.filter(item => item !== null && item !== undefined);
+
       // 데이터를 포장해 서버로 쏨
       await signupAPI({
         email: email,
         nickname: nickname,
         password: password,
-        allergies: selectedAllergies,
-        kitchenTools: selectedTools,
+        allergies: selectedAllergies || [],
+        kitchenTools: selectedTools || [],
         tastes: { spicy: 3, salty: 3, sweet: 3, bitter: 3, sour: 3, savory: 3 }
       });
 

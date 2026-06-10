@@ -5,8 +5,8 @@ import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity
 
 import { useIsFocused } from '@react-navigation/native';
 
-// 기록 수정 및 삭제 API 가져오기
-import { deleteHistoryAPI, updateHistoryAPI } from '../services/api';
+// 즐겨찾기 API(toggleBookmarkAPI) 추가
+import { deleteHistoryAPI, updateHistoryAPI, toggleBookmarkAPI } from '../services/api';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
@@ -93,15 +93,14 @@ export default function HomeScreen() {
 
   const sortedRecipes = getSortedRecipes();
 
-  // 서버에 기록 삭제 요청
   const handleDelete = (id) => {
     Alert.alert('기록 삭제', '이 요리 기록을 정말 지우시겠습니까?', [
       { text: '취소', style: 'cancel' },
       {
         text: '삭제', style: 'destructive', onPress: async () => {
           try {
-            await deleteHistoryAPI(id); // 백엔드 지우기
-            deleteTriedRecipe(id); // 내 폰에서 지우기
+            await deleteHistoryAPI(id);
+            deleteTriedRecipe(id);
             setModalVisible(false);
           } catch (error) {
             Alert.alert('오류', '서버에서 삭제하지 못했습니다.');
@@ -118,21 +117,31 @@ export default function HomeScreen() {
     setIsEditing(true);
   };
 
-  // 서버에 기록 수정 요청
   const handleEditSave = async () => {
     if (editRating === 0) {
       Alert.alert('알림', '별점을 선택해 주세요!');
       return;
     }
     try {
-      await updateHistoryAPI(selectedRecipe?.id, { rating: editRating, comment: editComment }); // 백엔드 수정
-
-      editTriedRecipe(selectedRecipe?.id, { rating: editRating, comment: editComment }); // 내 폰 수정
+      await updateHistoryAPI(selectedRecipe?.id, { rating: editRating, comment: editComment });
+      editTriedRecipe(selectedRecipe?.id, { rating: editRating, comment: editComment });
       setSelectedRecipe({ ...selectedRecipe, rating: editRating, comment: editComment });
       setIsEditing(false);
       Alert.alert('수정 완료', '기록이 성공적으로 수정되었습니다.');
     } catch (error) {
       Alert.alert('오류', '서버에 수정 사항을 저장하지 못했습니다.');
+    }
+  };
+
+  // 즐겨찾기 상태 서버 연동 함수
+  const handleToggleBookmark = async (recipe) => {
+    const newBookmarkStatus = !recipe.isBookmark;
+    try {
+      await toggleBookmarkAPI(recipe.id, newBookmarkStatus);
+      editTriedRecipe(recipe.id, { isBookmark: newBookmarkStatus });
+    } catch (error) {
+      console.error(error);
+      Alert.alert("즐겨찾기 실패", "서버 업데이트에 실패했습니다.");
     }
   };
 
@@ -193,8 +202,14 @@ export default function HomeScreen() {
                 }}
               >
                 <View style={styles.recipeHeader}>
-                  <Text style={styles.recipeName}>{recipe?.name || '알 수 없는 요리'}</Text>
-                  <Text style={styles.recipeDate}>{recipe?.date || ''}</Text>
+                  <View>
+                    <Text style={styles.recipeName}>{recipe?.name || '알 수 없는 요리'}</Text>
+                    <Text style={styles.recipeDate}>{recipe?.date || ''}</Text>
+                  </View>
+                  {/* 💡 [추가] 즐겨찾기(북마크) 아이콘 토글 */}
+                  <TouchableOpacity onPress={() => handleToggleBookmark(recipe)} style={{ padding: 5 }}>
+                    <Ionicons name={recipe.isBookmark ? "bookmark" : "bookmark-outline"} size={24} color={recipe.isBookmark ? "#f1c40f" : "#bdc3c7"} />
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.ratingRow}>
@@ -310,7 +325,7 @@ const styles = StyleSheet.create({
   separator: { width: 1, height: 40, backgroundColor: '#dfe6e9' },
   recipeItem: { marginTop: 10, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#f1f2f6' },
   recipeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  recipeName: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50' },
+  recipeName: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50', marginBottom: 4 },
   recipeDate: { fontSize: 12, color: '#bdc3c7' },
   ratingRow: { flexDirection: 'row', alignItems: 'center', marginTop: 5, marginBottom: 10 },
   ratingText: { marginLeft: 5, fontSize: 14, fontWeight: 'bold', color: '#f39c12' },

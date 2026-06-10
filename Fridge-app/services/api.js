@@ -34,6 +34,8 @@ export const deleteFridgeItemAPI = (itemId) => api.delete(`/api/fridge/${itemId}
 // [API 3] Vision AI 확정 데이터 저장
 export const addVisionItemsAPI = (data) => api.post('/vision/add', data);
 
+// [API 15] 재고 자동 차감
+export const deductFridgeItemsAPI = (items) => api.post('/api/fridge/deduct', { items });
 
 // ==========================================
 // [레시피 및 챗봇 관련 API 모음]
@@ -48,6 +50,8 @@ export const getRecipeDetailAPI = (data) => api.post('/api/recipe/detail', data)
 // [API 8] 레시피 후속 대화 (챗봇)
 export const sendRecipeChatAPI = (data) => api.post('/api/recipe/chat', data);
 
+// [API 16] 즐겨찾기 토글
+export const toggleBookmarkAPI = (id, isBookmark) => api.put(`/api/recipe/history/${id}/bookmark`, { isBookmark });
 
 // ==========================================
 // [유저 인증 및 마이페이지 API 모음]

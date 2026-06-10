@@ -1,7 +1,7 @@
 const express = require('express');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
-const cors = require('cors'); 
+const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
@@ -11,8 +11,8 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-app.use(cors()); 
-app.use(express.json()); 
+app.use(cors());
+app.use(express.json());
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -80,14 +80,14 @@ app.get('/api/fridge', async (req, res) => {
     try {
         const hasExpiryDate = await hasExpiryDateColumn();
         const query = `
-            SELECT 
-                f.item_id AS id, 
-                i.name, 
-                i.category, 
-                f.quantity AS amount, 
-                f.unit, 
+            SELECT
+                f.item_id AS id,
+                i.name,
+                i.category,
+                f.quantity AS amount,
+                f.unit,
                 ${hasExpiryDate ? 'f.expiry_date' : 'NULL'} AS expiryDate
-            FROM fridge_items f 
+            FROM fridge_items f
             JOIN ingredients i ON f.ingredient_id = i.ingredient_id`;
         const [rows] = await pool.query(query);
         res.json(rows);
@@ -105,7 +105,7 @@ app.post('/api/fridge/add', async (req, res) => {
         // 1. 재료 사전에 있는지 확인 (Vision AI 로직과 동일하게 변경)
         let [ing] = await pool.query('SELECT ingredient_id FROM ingredients WHERE name = ?', [name]);
         let ingId;
-        
+
         if (ing.length === 0) {
             const [newIng] = await pool.query('INSERT INTO ingredients (name, category) VALUES (?, ?)', [name, category]);
             ingId = newIng.insertId;
@@ -121,7 +121,7 @@ app.post('/api/fridge/add', async (req, res) => {
             ? [ingId, amount, unit, expiryDate || null]
             : [ingId, amount, unit];
         const [result] = await pool.query(sql, params);
-        
+
         // 3. 명세서 조건: 추가된 식재료의 id 반환
         res.json({ id: result.insertId, message: "식재료가 수동으로 추가되었습니다!" });
     } catch (err) {
@@ -136,7 +136,7 @@ app.post('/vision/add', async (req, res) => {
     try {
         let [ing] = await pool.query('SELECT ingredient_id FROM ingredients WHERE name = ?', [name]);
         let ingId;
-        
+
         if (ing.length === 0) {
             const [newIng] = await pool.query('INSERT INTO ingredients (name, category) VALUES (?, ?)', [name, category]);
             ingId = newIng.insertId;
@@ -154,8 +154,8 @@ app.post('/vision/add', async (req, res) => {
 
 // [API 4] 식재료 수정 (소비기한 수정) - 이미 완벽함!
 app.put('/api/fridge/:item_id', async (req, res) => {
-    const { item_id } = req.params; 
-    const { expiryDate } = req.body; 
+    const { item_id } = req.params;
+    const { expiryDate } = req.body;
 
     try {
         const hasExpiryDate = await hasExpiryDateColumn();
@@ -166,7 +166,7 @@ app.put('/api/fridge/:item_id', async (req, res) => {
 
         const sql = 'UPDATE fridge_items SET expiry_date = ? WHERE item_id = ?';
         await pool.query(sql, [expiryDate, item_id]);
-        
+
         res.json({ message: "식재료의 소비기한(D-day)이 수정되었습니다." });
     } catch (err) {
         console.error(err);
@@ -176,12 +176,12 @@ app.put('/api/fridge/:item_id', async (req, res) => {
 
 // [API 5] 식재료 삭제 - 이미 완벽함!
 app.delete('/api/fridge/:item_id', async (req, res) => {
-    const { item_id } = req.params; 
-    
+    const { item_id } = req.params;
+
     try {
         const sql = 'DELETE FROM fridge_items WHERE item_id = ?';
         await pool.query(sql, [item_id]);
-        
+
         res.json({ message: "다 쓰거나 버린 식재료를 냉장고에서 삭제했습니다." });
     } catch (err) {
         console.error(err);
@@ -349,10 +349,10 @@ app.post('/api/auth/signup', async (req, res) => {
     try {
         const sql = `INSERT INTO user_profile (email, password, nickname, allergies, kitchen_tools, preferred_ingredients)
                      VALUES (?, ?, ?, ?, ?, ?)`;
-        
+
         // 배열 데이터는 텍스트(JSON)로 변환해서 저장
         await pool.query(sql, [email, password, nickname, JSON.stringify(allergies), JSON.stringify(kitchenTools), JSON.stringify(tastes)]);
-        
+
         res.json({ message: "이메일과 맞춤 설정 데이터를 받아 회원가입을 처리했습니다." });
     } catch (err) {
         console.error(err);
@@ -394,7 +394,7 @@ app.put('/api/user/profile', async (req, res) => {
         // 테스트용으로 1번 유저의 설정을 업데이트
         const sql = 'UPDATE user_profile SET allergies = ?, kitchen_tools = ?, preferred_ingredients = ? WHERE user_id = 1';
         await pool.query(sql, [JSON.stringify(allergies), JSON.stringify(kitchenTools), JSON.stringify(tastes)]);
-        
+
         res.json({ message: "마이페이지에서 내 입맛 및 주방 설정을 수정했습니다." });
     } catch (err) {
         console.error(err);
@@ -413,7 +413,7 @@ app.post('/api/recipe/history', async (req, res) => {
         const sql = 'INSERT INTO user_feedback (user_id, recipe_name, rating, comment, taste_feedback) VALUES (?, ?, ?, ?, ?)';
         // tasteFeedback은 객체 형태이므로 텍스트(JSON)로 변환
         await pool.query(sql, [1, name, rating, comment, JSON.stringify(tasteFeedback)]);
-        
+
         res.json({ message: "홈 화면용 요리 기록 및 6단계 입맛 피드백을 저장했습니다." });
     } catch (err) {
         console.error(err);
@@ -428,7 +428,7 @@ app.put('/api/recipe/history/:id', async (req, res) => {
     try {
         const sql = 'UPDATE user_feedback SET rating = ?, comment = ? WHERE feedback_id = ?';
         await pool.query(sql, [rating, comment, id]);
-        
+
         res.json({ message: "홈 화면에 저장된 요리 기록(별점, 코멘트)을 수정했습니다." });
     } catch (err) {
         console.error(err);
@@ -442,7 +442,7 @@ app.delete('/api/recipe/history/:id', async (req, res) => {
     try {
         const sql = 'DELETE FROM user_feedback WHERE feedback_id = ?';
         await pool.query(sql, [id]);
-        
+
         res.json({ message: "홈 화면에 저장된 요리 기록을 삭제했습니다." });
     } catch (err) {
         console.error(err);

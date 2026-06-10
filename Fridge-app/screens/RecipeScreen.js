@@ -2,13 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 요리 기록 API 추가
-import { getRecipeDetailAPI, recommendRecipeAPI, sendRecipeChatAPI, addHistoryAPI } from '../services/api';
+// 재고 차감 API(deductFridgeItemsAPI) 추가
+import { getRecipeDetailAPI, recommendRecipeAPI, sendRecipeChatAPI, addHistoryAPI, deductFridgeItemsAPI } from '../services/api';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
 export default function RecipeScreen() {
   const ingredients = useFridgeStore((state) => state.ingredients);
+  const fetchIngredients = useFridgeStore((state) => state.fetchIngredients); // 💡 재고 차감 후 새로고침용
   const userProfile = useUserStore((state) => state.userProfile);
 
   const addTriedRecipe = useUserStore((state) => state.addTriedRecipe);
@@ -43,7 +44,6 @@ export default function RecipeScreen() {
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
 
-  // 냉장고에서 유통기한이 3일 이내로 남은 재료만 골라냄
   const urgentItems = (ingredients || []).filter(item => {
     if (!item.expiryDate) return false;
     const expDate = new Date(item.expiryDate);
@@ -53,7 +53,6 @@ export default function RecipeScreen() {
     return diffDays >= 0 && diffDays <= 3;
   });
 
-  // 일반 추천과 임박 추천을 나누는 함수
   const handleGenerateRecipe = async (isUrgent = false) => {
     if (!isPremium) {
       if (freeCount > 0) {
@@ -64,10 +63,7 @@ export default function RecipeScreen() {
       }
     }
 
-    // AI에게 보낼 명령(Query) 세팅
     let finalQuery = "내 냉장고 재료로 만들 수 있는 요리";
-
-    // 만약 유저가 '임박 식재료 파기' 버튼을 눌렀다면
     if (isUrgent) {
       const urgentNames = urgentItems.map(i => i.name).join(', ');
       finalQuery = `유통기한이 3일 이내로 남은 [${urgentNames}]를 무조건 최우선으로 다량 소비할 수 있는 레시피를 추천해 줘.`;
@@ -135,26 +131,77 @@ export default function RecipeScreen() {
     const newMsg = { id: Date.now(), sender: 'user', text };
     setMessages(prev => [...prev, newMsg]);
     setChatInput('');
-
     setMessages(prev => [...prev, { id: 'loading', sender: 'bot', text: "AI 답변 생성 중... 🛠️" }]);
 
     try {
       const response = await sendRecipeChatAPI({ sessionId, message: text });
-
       if (response.data) {
         const data = response.data.data || response.data;
         let replyText = data.answer_summary || "답변을 불러오지 못했습니다.";
-
-        if (data.tips && data.tips.length > 0) {
-          replyText += "\n\n💡 꿀팁:\n- " + data.tips.join("\n- ");
-        }
-
+        if (data.tips && data.tips.length > 0) replyText += "\n\n💡 꿀팁:\n- " + data.tips.join("\n- ");
         setMessages(prev => prev.filter(msg => msg.id !== 'loading'));
         setMessages(prev => [...prev, { id: Date.now(), sender: 'bot', text: replyText }]);
       }
     } catch (error) {
       setMessages(prev => prev.filter(msg => msg.id !== 'loading'));
       setMessages(prev => [...prev, { id: Date.now(), sender: 'bot', text: "통신 오류가 발생했습니다. 🥲" }]);
+    }
+  };
+
+  // 재고 자동 차감 로직
+  const deductIngredients = async (recipeDetail) => {
+    if (!recipeDetail) return;
+
+    // AI가 준 재료 목록(ingredients 또는 required_ingredients) 추출
+    const recipeIngredients = recipeDetail.required_ingredients || recipeDetail.ingredients || [];
+
+    // 내 냉장고에 있는 재료와 이름이 일치하는 것들의 ID와 수량을 포장
+    const itemsToDeduct = recipeIngredients.map(ing => ({
+      id: ingredients.find(i => i.name === ing.name)?.id,
+      usedAmount: Number(ing.amount) || 1
+    })).filter(i => i.id); // 냉장고에 진짜 있는 재료만 필터링
+
+    if (itemsToDeduct.length > 0) {
+      try {
+        await deductFridgeItemsAPI(itemsToDeduct);
+        fetchIngredients(); // 차감 완료 후 냉장고 새로고침!
+      } catch (error) {
+        console.error("재고 차감 오류:", error);
+      }
+    }
+  };
+
+  const saveRecipeRecord = async (isReflectTaste) => {
+    if (rating === 0) { Alert.alert('알림', '별점을 선택해주세요!'); return; }
+    const recipeTitle = selectedRecipe?.name || selectedRecipe?.recipeName || '요리';
+
+    try {
+      await addHistoryAPI({
+        name: recipeTitle,
+        date: new Date().toLocaleDateString(),
+        rating: rating,
+        comment: comment,
+        tasteFeedback: isReflectTaste ? feedback : null
+      });
+
+      addTriedRecipe({
+        id: Date.now().toString(),
+        name: recipeTitle,
+        date: new Date().toLocaleDateString(),
+        rating,
+        comment,
+        isBookmark: false // 기본 즐겨찾기 상태 추가
+      });
+
+      // 요리 기록 저장이 성공하면 재고를 차감합니다
+      await deductIngredients(recipeDetailData);
+
+      setModalVisible(false);
+      setView('list');
+      Alert.alert('저장 완료 🍽️', '요리 기록 저장 및 재고 차감이 완료되었습니다!');
+    } catch (error) {
+      console.error(error);
+      Alert.alert('저장 실패', '서버 통신 중 오류가 발생했습니다. 다시 시도해주세요.');
     }
   };
 
@@ -168,40 +215,6 @@ export default function RecipeScreen() {
     setShowAdModal(false);
     setIsPremium(true);
     Alert.alert("구독 완료 🎉", "프리미엄 회원이 되셨습니다!");
-  };
-
-  // 별점과 피드백을 서버 DB에 영구 저장합니다
-  const saveRecipeRecord = async (isReflectTaste) => {
-    if (rating === 0) { Alert.alert('알림', '별점을 선택해주세요!'); return; }
-
-    const recipeTitle = selectedRecipe?.name || selectedRecipe?.recipeName || '요리';
-
-    try {
-      // 1. 서버 API 호출 (DB에 저장)
-      await addHistoryAPI({
-        name: recipeTitle,
-        date: new Date().toLocaleDateString(),
-        rating: rating,
-        comment: comment,
-        tasteFeedback: isReflectTaste ? feedback : null
-      });
-
-      // 2. 내 폰 화면에도 보여주기 위해 스토어에 추가
-      addTriedRecipe({
-        id: Date.now().toString(),
-        name: recipeTitle,
-        date: new Date().toLocaleDateString(),
-        rating,
-        comment
-      });
-
-      setModalVisible(false);
-      setView('list');
-      Alert.alert('저장 완료 🍽️', '요리 기록이 서버에 안전하게 저장되었습니다!');
-    } catch (error) {
-      console.error(error);
-      Alert.alert('저장 실패', '서버 통신 중 오류가 발생했습니다. 다시 시도해주세요.');
-    }
   };
 
   const renderScale = (type, labels) => {
@@ -238,15 +251,13 @@ export default function RecipeScreen() {
             )}
           </View>
 
-          {/* 기존 일반 추천 버튼 */}
           <TouchableOpacity style={styles.mainGenerateButton} onPress={() => handleGenerateRecipe(false)} disabled={isLoading}>
             {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.mainGenerateButtonText}>내 냉장고로 새 레시피 생성하기</Text>}
           </TouchableOpacity>
 
-          {/* 임박 식재료 처리 버튼 (임박한 식재료가 1개라도 있을 때만 뜹니다) */}
           {urgentItems.length > 0 && (
             <TouchableOpacity style={styles.urgentGenerateButton} onPress={() => handleGenerateRecipe(true)} disabled={isLoading}>
-              {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.urgentGenerateButtonText}>유통기한 임박 식재료 ({urgentItems.length}개) 처리 레시피 추천</Text>}
+              {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.urgentGenerateButtonText}>🚨 임박 식재료 ({urgentItems.length}개) 파기 레시피 추천</Text>}
             </TouchableOpacity>
           )}
 
@@ -419,48 +430,37 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f6fa' },
   header: { flexDirection: 'row', alignItems: 'center', padding: 20, paddingTop: 60, backgroundColor: '#fff', paddingBottom: 15 },
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#2c3e50' },
-
   statusBox: { padding: 12, backgroundColor: '#f1f2f6', borderRadius: 10, alignItems: 'center', marginHorizontal: 15, marginBottom: 8 },
   freeText: { fontSize: 14, color: '#2c3e50' },
   premiumText: { fontSize: 14, color: '#e67e22', fontWeight: 'bold' },
   mainGenerateButton: { backgroundColor: '#3498db', padding: 14, borderRadius: 12, alignItems: 'center', marginHorizontal: 15, marginBottom: 15, height: 50, justifyContent: 'center' },
   mainGenerateButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-
-  // 💡 [신규 추가] 임박 식재료 추천 버튼 스타일
   urgentGenerateButton: { backgroundColor: '#e74c3c', padding: 14, borderRadius: 12, alignItems: 'center', marginHorizontal: 15, marginBottom: 15, height: 50, justifyContent: 'center' },
   urgentGenerateButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-
   listTitle: { fontSize: 18, fontWeight: 'bold', color: '#34495e', marginBottom: 10, marginTop: 10 },
   recipeListItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: 18, borderRadius: 12, marginBottom: 10, elevation: 1 },
   listItemName: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50', marginBottom: 5 },
   listItemInfo: { fontSize: 13, color: '#7f8c8d' },
-
   categoryContainer: { backgroundColor: '#fff', paddingVertical: 5, paddingHorizontal: 15, marginBottom: 5 },
   categoryBadge: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f1f2f6', marginRight: 10 },
   categoryBadgeActive: { backgroundColor: '#2ecc71' },
   categoryText: { color: '#7f8c8d', fontWeight: '600' },
   categoryTextActive: { color: '#fff' },
-
   recipeCard: { backgroundColor: '#fff', margin: 15, padding: 20, borderRadius: 15, elevation: 2 },
   badge: { alignSelf: 'flex-start', backgroundColor: '#e8f8f5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, marginBottom: 10 },
   badgeText: { color: '#1abc9c', fontWeight: 'bold', fontSize: 12 },
   recipeTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 15, color: '#2c3e50' },
-
   reasonBox: { backgroundColor: '#f8f9fa', padding: 15, borderRadius: 10, marginBottom: 25 },
   reasonText: { fontSize: 14, color: '#34495e', fontStyle: 'italic', lineHeight: 20 },
   infoSection: { marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#f1f2f6' },
   infoText: { fontSize: 15, color: '#2c3e50', marginTop: 5, lineHeight: 22 },
-
   stepSection: { marginBottom: 20 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#34495e', marginBottom: 10 },
   stepText: { fontSize: 15, color: '#34495e', marginBottom: 8, lineHeight: 24 },
-
   bottomButtonContainer: { padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#f1f2f6' },
   cookButton: { backgroundColor: '#2ecc71', padding: 15, borderRadius: 12, alignItems: 'center' },
   cookButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-
   chatFab: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#3498db', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 8, zIndex: 100 },
-
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
   chatModalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '80%', backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, paddingBottom: 30 },
   chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 15, marginBottom: 15 },
@@ -471,14 +471,12 @@ const styles = StyleSheet.create({
   chatInputRow: { flexDirection: 'row', alignItems: 'center' },
   chatInputBox: { flex: 1, backgroundColor: '#f1f2f6', borderRadius: 25, paddingHorizontal: 20, paddingVertical: 12, marginRight: 10, fontSize: 15 },
   chatSendBtn: { backgroundColor: '#2ecc71', width: 45, height: 45, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
-
   adModalBox: { width: '85%', backgroundColor: '#fff', padding: 25, borderRadius: 20, alignItems: 'center', alignSelf: 'center', marginBottom: Platform.OS === 'web' ? 0 : '50%' },
   adModalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
   adModalDesc: { fontSize: 14, color: '#7f8c8d', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
   adWatchButton: { flexDirection: 'row', backgroundColor: '#3498db', padding: 15, borderRadius: 10, width: '100%', justifyContent: 'center', marginBottom: 10 },
   premiumSubscribeButton: { flexDirection: 'row', backgroundColor: '#9b59b6', padding: 15, borderRadius: 10, width: '100%', justifyContent: 'center' },
   adButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
-
   modalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '90%', maxHeight: Platform.OS === 'web' ? 720 : '100%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, alignItems: 'center', paddingBottom: 40 },
   feedbackModalTitle: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50', marginBottom: 10, textAlign: 'center' },
   feedbackModalSubtitle: { fontSize: 14, color: '#7f8c8d', textAlign: 'center', marginBottom: 20 },
