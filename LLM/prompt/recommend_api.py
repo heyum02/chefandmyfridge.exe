@@ -71,8 +71,28 @@ def normalize_recipe(recipe: Dict[str, Any]) -> Dict[str, Any]:
             if not should_ignore_missing_ingredient(str(ingredient))
         ]
 
+    available_ingredients = recipe.get("available_ingredients", [])
+    if isinstance(available_ingredients, list):
+        recipe["ingredient_match_count"] = len(available_ingredients)
+    else:
+        recipe["ingredient_match_count"] = 0
+
     recipe["missing_ingredient_count"] = len(recipe.get("missing_ingredients", []))
     return recipe
+
+
+def sort_recipes(recipes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(
+        recipes,
+        key=lambda recipe: (
+            -int(recipe.get("ingredient_match_count", 0) or 0),
+            int(recipe.get("missing_ingredient_count", 0) or 0),
+            int(len(recipe.get("insufficient_ingredients", [])))
+            if isinstance(recipe.get("insufficient_ingredients", []), list)
+            else 0,
+            str(recipe.get("name", "")),
+        ),
+    )
 
 
 def main() -> None:
@@ -80,21 +100,28 @@ def main() -> None:
         payload = parse_request_payload()
 
         ingredients = payload.get("ingredients") or []
+        query = str(payload.get("query", "냉장고 재료로 만들 수 있는 한식") or "").strip()
+        user_prompt = str(payload.get("userPrompt", "") or "").strip()
 
         if not isinstance(ingredients, list):
             ingredients = []
 
         ingredient_names = extract_ingredient_names(ingredients)
+        rag_query = query
+        if user_prompt:
+            rag_query = f"{query} {user_prompt}".strip()
 
         db = RecipeDatabase()
         rag_context, search_info = db.prepare_rag_context(
-            user_query=payload.get("query", "냉장고 재료로 만들 수 있는 한식"),
+            user_query=rag_query,
             ingredients=ingredient_names,
         )
 
         request = RecipeRecommendationRequest(
             ingredients=ingredients,
             rag_context=rag_context,
+            servings=max(1, int(payload.get("servings", 1) or 1)),
+            user_prompt=user_prompt,
             allergies=payload.get("allergies", []),
             cooking_tools=payload.get("cookingTools", []),
             cooking_history=payload.get("cookingHistory", []),
@@ -112,7 +139,10 @@ def main() -> None:
         )
         response_json = parse_model_json(response_text)
         recipes = [normalize_recipe(recipe) for recipe in response_json.get("recipes", [])]
+        recipes = sort_recipes(recipes)
         response_json["recipes"] = recipes
+        response_json["servings"] = request.servings
+        response_json["user_prompt"] = request.user_prompt
 
         print(
             json.dumps(
@@ -121,6 +151,8 @@ def main() -> None:
                     "mockIngredientsUsed": False,
                     "searchInfo": search_info,
                     "recipeCount": len(recipes),
+                    "servings": request.servings,
+                    "userPrompt": request.user_prompt,
                     "recipes": recipes,
                     "data": response_json,
                 },
