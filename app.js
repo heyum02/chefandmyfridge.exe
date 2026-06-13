@@ -69,7 +69,7 @@ function runPythonJsonScript(scriptPath, payload) {
 // [도메인 1] 냉장고 및 식재료 API
 // ==========================================
 
-// [API 1] 냉장고 조회
+// [API 1] 냉장고 조회 (피드백 1 반영: user_id 기준 내 냉장고만 조회)
 app.get('/api/fridge', async (req, res) => {
     try {
         const userId = req.query.userId || 1;
@@ -92,7 +92,7 @@ app.get('/api/fridge', async (req, res) => {
     }
 });
 
-// [API 2] 식재료 수동 추가
+// [API 2] 식재료 수동 추가 (user_id 매핑 완료)
 app.post('/api/fridge/add', async (req, res) => {
     const { userId = 1, name, category, amount, unit, expiryDate } = req.body;
     try {
@@ -122,7 +122,7 @@ app.post('/api/fridge/add', async (req, res) => {
     }
 });
 
-// [API 3] Vision AI 데이터 저장
+// [API 3] Vision AI 데이터 저장 (user_id 매핑 완료)
 app.post('/vision/add', async (req, res) => {
     const { userId = 1, name, category, quantity, unit } = req.body;
     try {
@@ -144,7 +144,7 @@ app.post('/vision/add', async (req, res) => {
     }
 });
 
-// [API 4] 식재료 전체 수정
+// [API 4] 식재료 전체 수정 (피드백 2 반영: 이름, 카테고리, 수량, 단위, 소비기한 전체 수정 가능)
 app.put('/api/fridge/:item_id', async (req, res) => {
     const { item_id } = req.params; 
     const { name, category, amount, unit, expiryDate } = req.body; 
@@ -152,6 +152,7 @@ app.put('/api/fridge/:item_id', async (req, res) => {
     try {
         const hasExpiryDate = await hasExpiryDateColumn();
 
+        // 이름이나 카테고리가 바뀌었을 수 있으므로 마스터 사전(ingredients) 먼저 업데이트 또는 조회
         let [ing] = await pool.query('SELECT ingredient_id FROM ingredients WHERE name = ?', [name]);
         let ingId;
         
@@ -160,6 +161,8 @@ app.put('/api/fridge/:item_id', async (req, res) => {
             ingId = newIng.insertId;
         } else {
             ingId = ing[0].ingredient_id;
+            // 이미 등록된 재료의 카테고리가 바뀌었을 수도 있으니 같이 업데이트 처리
+            await pool.query('UPDATE ingredients SET category = ? WHERE ingredient_id = ?', [category, ingId]);
         }
 
         const sql = hasExpiryDate
@@ -213,7 +216,7 @@ app.post('/api/fridge/deduct', async (req, res) => {
 // [도메인 2] AI 레시피 및 챗봇 API
 // ==========================================
 
-// [API 6] 레시피 추천
+// [API 6] レ시피 추천 (진짜 내 냉장고 재료 연동 유지)
 app.post('/api/recipe/recommend', async (req, res) => {
     try {
         const userId = req.body.userId || 1;
@@ -365,8 +368,8 @@ app.post('/api/auth/login', async (req, res) => {
             userId: user.user_id, 
             token: "dummy-token-for-capstone",
             nickname: user.nickname,
-            isPremium: user.is_premium === 1, // DB 값 반영
-            freeCount: user.free_count,       // DB 값 반영
+            isPremium: user.is_premium === 1, 
+            freeCount: user.free_count,       
             allergies: JSON.parse(user.allergies || '[]'),
             kitchenTools: JSON.parse(user.kitchen_tools || '[]'),
             tastes: JSON.parse(user.preferred_ingredients || '[]')
@@ -394,16 +397,41 @@ app.put('/api/user/profile', async (req, res) => {
 // [도메인 4] 요리 완료 기록 및 피드백
 // ==========================================
 
-// [API 12] 요리 완료 기록 저장
+// [API 12] 요리 완료 기록 저장 (피드백 3 반영: 실제 입맛 데이터 user_profile 자동 업데이트 로직 고도화)
 app.post('/api/recipe/history', async (req, res) => {
     const { userId = 1, name, date, rating, comment, tasteFeedback } = req.body;
     try {
-        const sql = 'INSERT INTO user_feedback (user_id, recipe_name, rating, comment, taste_feedback) VALUES (?, ?, ?, ?, ?)';
-        await pool.query(sql, [userId, name, rating, comment, JSON.stringify(tasteFeedback)]);
-        res.json({ message: "요리 기록 저장 완료" });
+        // 1. 요리 피드백 내역 기록 저장
+        const sqlFeedback = 'INSERT INTO user_feedback (user_id, recipe_name, rating, comment, taste_feedback) VALUES (?, ?, ?, ?, ?)';
+        await pool.query(sqlFeedback, [userId, name, rating, comment, JSON.stringify(tasteFeedback)]);
+
+        // 2. 유저 프로필 테이블의 preferred_ingredients(실제 입맛 데이터) 업데이트 로직 실행
+        const [profiles] = await pool.query('SELECT preferred_ingredients FROM user_profile WHERE user_id = ?', [userId]);
+        
+        let preferredIngredients = [];
+        if (profiles.length > 0 && profiles[0].preferred_ingredients) {
+            try {
+                preferredIngredients = JSON.parse(profiles[0].preferred_ingredients);
+                if (!Array.isArray(preferredIngredients)) {
+                    preferredIngredients = [];
+                }
+            } catch (e) {
+                preferredIngredients = [];
+            }
+        }
+
+        // 완성한 요리명(name)을 실제 유저 선호 입맛 리스트에 누적(중복 제거)
+        if (name && !preferredIngredients.includes(name)) {
+            preferredIngredients.push(name);
+        }
+
+        // 유저 프로필 갱신
+        await pool.query('UPDATE user_profile SET preferred_ingredients = ? WHERE user_id = ?', [JSON.stringify(preferredIngredients), userId]);
+
+        res.json({ message: "요리 기록 저장 및 실제 입맛 추천 데이터가 유저 프로필에 성공적으로 동기화되었습니다." });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: "요리 기록 저장 오류" });
+        res.status(500).json({ error: "요리 기록 저장 및 입맛 데이터 갱신 중 오류가 발생했습니다." });
     }
 });
 
@@ -447,7 +475,7 @@ app.put('/api/recipe/history/:id/bookmark', async (req, res) => {
 });
 
 // ==========================================
-// [도메인 5] 비즈니스 모델 API (실제 DB 연동 완료)
+// [도메인 5] 비즈니스 모델 API
 // ==========================================
 
 // [API 17] 프리미엄 구독 완료 처리
@@ -462,7 +490,7 @@ app.put('/api/user/subscribe', async (req, res) => {
     }
 });
 
-// [API 18] 광고 시청 보상 지급 (무료 이용 횟수 +5회 충전)
+// [API 18] 광고 시청 보상 지급
 app.put('/api/user/reward', async (req, res) => {
     const { userId = 1 } = req.body;
     try {
