@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
-import { Alert, Modal, Platform, ScrollView, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, SectionList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFridgeStore } from '../store/useFridgeStore';
 
 const getCategoryIcon = (category) => {
@@ -11,47 +12,61 @@ const getCategoryIcon = (category) => {
   }
 };
 
+// 💡 [핵심 해결] 백엔드에서 온 UTC 시간을 한국 시간(로컬)으로 똑똑하게 변환!
+const cleanDateString = (dateStr) => {
+  if (!dateStr) return null;
+  const d = new Date(dateStr); // 긴 날짜 문자열을 실제 시간 객체로 변환
+  if (isNaN(d.getTime())) return null; // 에러 방지
+
+  let month = '' + (d.getMonth() + 1);
+  let day = '' + d.getDate();
+  const year = d.getFullYear();
+  if (month.length < 2) month = '0' + month;
+  if (day.length < 2) day = '0' + day;
+
+  return [year, month, day].join('-'); // 정확한 로컬 시간 YYYY-MM-DD 반환
+};
+
 const calculateDday = (dateString) => {
-  if (!dateString) return null;
-  const target = new Date(dateString);
+  const cleanDate = cleanDateString(dateString);
+  if (!cleanDate) return null;
+
+  const target = new Date(cleanDate);
   const today = new Date();
   target.setHours(0, 0, 0, 0);
   today.setHours(0, 0, 0, 0);
   const diffTime = target.getTime() - today.getTime();
-  // 💡 [수정됨] 홈 화면과 동일하게 시간 오차 방지를 위해 round(반올림) 적용!
-  return Math.round(diffTime / (1000 * 60 * 60 * 24)); 
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
 };
 
-const formatDate = (date) => {
+const formatDateToDot = (date) => {
   const d = new Date(date);
   let month = '' + (d.getMonth() + 1);
   let day = '' + d.getDate();
   const year = d.getFullYear();
   if (month.length < 2) month = '0' + month;
   if (day.length < 2) day = '0' + day;
-  return [year, month, day].join('-');
+  return [year, month, day].join('.');
 };
 
 export default function InventoryScreen() {
   const ingredients = useFridgeStore((state) => state.ingredients);
   const fetchIngredients = useFridgeStore((state) => state.fetchIngredients);
-  
-  useEffect(() => {
-    fetchIngredients();
-  }, []);
-  
   const addIngredient = useFridgeStore((state) => state.addIngredient);
   const removeIngredient = useFridgeStore((state) => state.removeIngredient);
   const updateIngredient = useFridgeStore((state) => state.updateIngredient);
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false); 
-  const [editingId, setEditingId] = useState(null); 
+  useEffect(() => { fetchIngredients(); }, []);
 
+  const [modalVisible, setModalVisible] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [inputText, setInputText] = useState('');
-  const [amount, setAmount] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState('기타');
-  const [daysLeft, setDaysLeft] = useState(7);
+  const [expiryDate, setExpiryDate] = useState(new Date());
+
+  // 달력 모달 표시 여부
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const categories = ['채소', '과일', '육류', '수산물', '유제품/계란', '양념/소스', '가공/냉동', '기타'];
 
@@ -62,32 +77,35 @@ export default function InventoryScreen() {
     return dDayA - dDayB;
   });
 
-  // 💡 [추가됨] 데이터를 임박한 재료와 안전한 재료 두 그룹으로 쪼갭니다!
-  const urgentItems = sortedIngredients.filter(item => {
-    const dDay = calculateDday(item.expiryDate);
-    return dDay !== null && dDay <= 3;
-  });
+  const urgentItems = [];
+  const categorizedItems = {};
 
-  const safeItems = sortedIngredients.filter(item => {
+  sortedIngredients.forEach(item => {
     const dDay = calculateDday(item.expiryDate);
-    return dDay === null || dDay > 3;
+    if (dDay !== null && dDay <= 3) {
+      urgentItems.push(item);
+    } else {
+      const cat = item.category || '기타';
+      if (!categorizedItems[cat]) categorizedItems[cat] = [];
+      categorizedItems[cat].push(item);
+    }
   });
 
   const sections = [];
-  if (urgentItems.length > 0) {
-    sections.push({ title: '🚨 유통기한 임박 (3일 이내)', data: urgentItems, isUrgent: true });
-  }
-  if (safeItems.length > 0) {
-    sections.push({ title: '✅ 보관 중인 식재료', data: safeItems, isUrgent: false });
-  }
+  if (urgentItems.length > 0) sections.push({ title: '🚨 유통기한 임박 (3일 이내)', data: urgentItems, isUrgent: true });
+  categories.forEach(cat => {
+    if (categorizedItems[cat] && categorizedItems[cat].length > 0) {
+      sections.push({ title: `${getCategoryIcon(cat)} ${cat}`, data: categorizedItems[cat], isUrgent: false });
+    }
+  });
 
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingId(null);
-    setInputText(''); 
-    setAmount(1); 
-    setSelectedCategory('기타'); 
-    setDaysLeft(7); 
+    setInputText('');
+    setSelectedCategory('기타');
+    setExpiryDate(new Date());
+    setShowDatePicker(false);
     setModalVisible(true);
   };
 
@@ -95,75 +113,35 @@ export default function InventoryScreen() {
     setIsEditMode(true);
     setEditingId(item.id);
     setInputText(item.name);
-    setAmount(item.amount);
     setSelectedCategory(item.category || '기타');
-    
-    const currentDday = calculateDday(item.expiryDate);
-    setDaysLeft(currentDday !== null ? currentDday : 7);
-    
+
+    const cleanDate = cleanDateString(item.expiryDate);
+    setExpiryDate(cleanDate ? new Date(cleanDate) : new Date());
+    setShowDatePicker(false);
     setModalVisible(true);
   };
 
-  const handleAmountChange = (value, setter, state) => { setter(Math.max(1, state + value)); }; 
+  const handleDateChange = (event, selectedDate) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false); // 안드로이드는 선택하면 달력 닫기
+    }
+    if (selectedDate) {
+      setExpiryDate(selectedDate);
+    }
+  };
 
   const handleSubmit = () => {
     if (inputText.trim() === '') { Alert.alert('알림', '식재료 이름을 입력해주세요!'); return; }
-    
-    const today = new Date();
-    today.setDate(today.getDate() + daysLeft);
-    const formattedDate = formatDate(today);
+
+    // DB에는 표준 형식(YYYY-MM-DD)으로 보냅니다.
+    const dbFormattedDate = formatDateToDot(expiryDate).replace(/\./g, '-');
 
     if (isEditMode) {
-      updateIngredient(editingId, { 
-        name: inputText, 
-        amount: amount, 
-        category: selectedCategory, 
-        expiryDate: formattedDate 
-      });
+      updateIngredient(editingId, { name: inputText, amount: 1, category: selectedCategory, expiryDate: dbFormattedDate });
     } else {
-      const newItem = { 
-        id: Date.now().toString(), 
-        name: inputText, 
-        amount: amount, 
-        unit: '개', 
-        category: selectedCategory, 
-        expiryDate: formattedDate 
-      };
-      addIngredient(newItem);
+      addIngredient({ id: Date.now().toString(), name: inputText, amount: 1, unit: '개', category: selectedCategory, expiryDate: dbFormattedDate });
     }
     setModalVisible(false);
-  };
-
-  const renderItem = ({ item }) => {
-    if (!item || !item.id) return null;
-
-    const dDay = calculateDday(item.expiryDate);
-    const isUrgent = dDay !== null && dDay <= 3;
-
-    return (
-      <View style={styles.card}>
-        <Text style={styles.icon}>{getCategoryIcon(item.category)}</Text>
-        
-        <TouchableOpacity style={styles.infoContainer} onPress={() => openEditModal(item)}>
-          <Text style={styles.name}>{item.name}</Text>
-          <Text style={styles.categoryText}>{item.category} (터치하여 수정)</Text>
-        </TouchableOpacity>
-        
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{item.amount} {item.unit}</Text>
-        </View>
-
-        <View style={[styles.ddayBadge, isUrgent && styles.ddayBadgeUrgent]}>
-          <Text style={[styles.ddayText, isUrgent && styles.ddayTextUrgent]}>
-            {dDay !== null ? (dDay < 0 ? `D+${Math.abs(dDay)}` : dDay === 0 ? 'D-Day' : `D-${dDay}`) : '기한 모름'}
-          </Text>
-        </View>
-
-        <TouchableOpacity style={styles.deleteBtn} onPress={() => removeIngredient(item.id)}>
-          <Ionicons name="trash-outline" size={24} color="#ff7675" />
-        </TouchableOpacity>
-      </View>
-    );
   };
 
   return (
@@ -176,16 +154,39 @@ export default function InventoryScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 💡 [수정됨] FlatList 대신 그룹 렌더링이 가능한 SectionList로 교체했습니다. */}
       <SectionList
         sections={sections}
         keyExtractor={(item, index) => item?.id ? String(item.id) : String(index)}
-        renderItem={renderItem}
+        renderItem={({ item }) => {
+          const cleanDate = cleanDateString(item.expiryDate);
+          const formattedDisplayDate = cleanDate ? cleanDate.replace(/-/g, '.') : '';
+          const dDay = calculateDday(cleanDate);
+          const isUrgent = dDay !== null && dDay <= 3;
+
+          return (
+            <View style={styles.card}>
+              <Text style={styles.icon}>{getCategoryIcon(item.category)}</Text>
+              <TouchableOpacity style={styles.infoContainer} onPress={() => openEditModal(item)}>
+                <Text style={styles.name}>{item.name}</Text>
+                <Text style={styles.categoryText}>{item.category} (터치하여 수정)</Text>
+              </TouchableOpacity>
+
+              <View style={{ alignItems: 'flex-end' }}>
+                <View style={[styles.ddayBadge, isUrgent && styles.ddayBadgeUrgent]}>
+                  <Text style={[styles.ddayText, isUrgent && styles.ddayTextUrgent]}>
+                    {dDay !== null ? (dDay < 0 ? `D+${Math.abs(dDay)}` : dDay === 0 ? 'D-Day' : `D-${dDay}`) : '기한 모름'}
+                  </Text>
+                </View>
+                {formattedDisplayDate !== '' && <Text style={styles.displayDateText}>{formattedDisplayDate} 까지</Text>}
+              </View>
+
+              <TouchableOpacity style={styles.deleteBtn} onPress={() => removeIngredient(item.id)}><Ionicons name="trash-outline" size={24} color="#ff7675" /></TouchableOpacity>
+            </View>
+          );
+        }}
         renderSectionHeader={({ section }) => (
           <View style={[styles.sectionHeader, section.isUrgent && styles.sectionHeaderUrgent]}>
-            <Text style={[styles.sectionHeaderText, section.isUrgent && styles.sectionHeaderTextUrgent]}>
-              {section.title}
-            </Text>
+            <Text style={[styles.sectionHeaderText, section.isUrgent && styles.sectionHeaderTextUrgent]}>{section.title}</Text>
           </View>
         )}
         contentContainerStyle={styles.listContainer}
@@ -194,46 +195,51 @@ export default function InventoryScreen() {
       />
 
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{isEditMode ? '식재료 정보 수정 ✏️' : '식재료 수기 추가 ➕'}</Text>
-            <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
-              <Text style={styles.sectionSubtitle}>🏷️ 식재료 이름</Text>
-              <TextInput style={styles.modalInput} placeholder="예: 사과, 대파" value={inputText} onChangeText={setInputText} />
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>{isEditMode ? '식재료 정보 수정 ✏️' : '식재료 수기 추가 ➕'}</Text>
+              <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
+                <Text style={styles.sectionSubtitle}>🏷️ 식재료 이름</Text>
+                <TextInput style={styles.modalInput} placeholder="예: 사과, 대파" value={inputText} onChangeText={setInputText} />
 
-              <Text style={styles.sectionSubtitle}>분류 카테고리</Text>
-              <View style={styles.chipContainer}>
-                {categories.map((cat) => (
-                  <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.activeChip]} onPress={() => setSelectedCategory(cat)}>
-                    <Text style={[styles.chipText, selectedCategory === cat && styles.activeChipText]}>{cat}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+                <Text style={styles.sectionSubtitle}>분류 카테고리</Text>
+                <View style={styles.chipContainer}>
+                  {categories.map((cat) => (
+                    <TouchableOpacity key={cat} style={[styles.chip, selectedCategory === cat && styles.activeChip]} onPress={() => setSelectedCategory(cat)}>
+                      <Text style={[styles.chipText, selectedCategory === cat && styles.activeChipText]}>{cat}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
-              <Text style={styles.sectionSubtitle}>🔢 수량 (개)</Text>
-              <View style={styles.amountContainer}>
-                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(-1, setAmount, amount)}><Ionicons name="remove" size={24} color="#2c3e50" /></TouchableOpacity>
-                <Text style={styles.amountText}>{amount}</Text>
-                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(1, setAmount, amount)}><Ionicons name="add" size={24} color="#2c3e50" /></TouchableOpacity>
-              </View>
+                <Text style={styles.sectionSubtitle}>⏳ 소비기한 선택</Text>
+                <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(!showDatePicker)}>
+                  <Ionicons name="calendar-outline" size={20} color="#34495e" style={{ marginRight: 10 }} />
+                  <Text style={styles.datePickerText}>{formatDateToDot(expiryDate)}</Text>
+                  <Ionicons name={showDatePicker ? "chevron-up" : "chevron-down"} size={20} color="#95a5a6" style={{ marginLeft: 'auto' }} />
+                </TouchableOpacity>
 
-              <Text style={styles.sectionSubtitle}>⏳ 소비기한 (며칠 남았나요?)</Text>
-              <View style={styles.amountContainer}>
-                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(-1, setDaysLeft, daysLeft)}><Ionicons name="remove" size={24} color="#2c3e50" /></TouchableOpacity>
-                <Text style={styles.amountText}>{daysLeft}일 남음</Text>
-                <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(1, setDaysLeft, daysLeft)}><Ionicons name="add" size={24} color="#2c3e50" /></TouchableOpacity>
+                {/* 💡 [핵심 해결] iOS는 펼쳐진 달력(inline)으로 즉시 렌더링 */}
+                {showDatePicker && (
+                  <View style={Platform.OS === 'ios' ? { backgroundColor: '#fff', borderRadius: 10, marginTop: 10, padding: 10 } : {}}>
+                    <DateTimePicker
+                      value={expiryDate}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                      onChange={handleDateChange}
+                    />
+                  </View>
+                )}
+
+              </ScrollView>
+              <View style={styles.modalButtonGroup}>
+                <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={styles.closeBtnText}>취소</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}><Text style={styles.submitBtnText}>{isEditMode ? '수정 완료하기' : '추가하기'}</Text></TouchableOpacity>
               </View>
-            </ScrollView>
-            <View style={styles.modalButtonGroup}>
-              <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={styles.closeBtnText}>취소</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
-                <Text style={styles.submitBtnText}>{isEditMode ? '수정 완료하기' : '추가하기'}</Text>
-              </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
-
     </View>
   );
 }
@@ -246,30 +252,26 @@ const styles = StyleSheet.create({
   openModalButton: { flexDirection: 'row', backgroundColor: '#2ecc71', paddingVertical: 12, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   openModalButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   listContainer: { padding: 15, paddingBottom: 40 },
-  
-  // 💡 [추가됨] 섹션 리스트 헤더 타이틀 스타일
-  sectionHeader: { paddingVertical: 12, paddingHorizontal: 5, marginBottom: 10, marginTop: 10, borderBottomWidth: 2, borderBottomColor: '#eee' },
+  sectionHeader: { paddingVertical: 12, paddingHorizontal: 5, marginBottom: 10, marginTop: 15, borderBottomWidth: 2, borderBottomColor: '#eee' },
   sectionHeaderUrgent: { borderBottomColor: '#ff7675' },
   sectionHeaderText: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
   sectionHeaderTextUrgent: { color: '#d63031' },
-
-  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 15, borderRadius: 15, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 15, borderRadius: 15, marginBottom: 10, elevation: 3 },
   icon: { fontSize: 35, marginRight: 15 },
   infoContainer: { flex: 1 },
   name: { fontSize: 18, fontWeight: '600', color: '#2c3e50' },
   categoryText: { fontSize: 12, color: '#95a5a6', marginTop: 3 },
-  badge: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#f1f2f6', marginRight: 10 },
-  badgeText: { fontSize: 15, fontWeight: 'bold', color: '#2c3e50' },
-  ddayBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#ecf0f1', marginRight: 10 },
+  ddayBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#ecf0f1', marginRight: 10, alignSelf: 'flex-end' },
   ddayText: { fontSize: 13, fontWeight: 'bold', color: '#7f8c8d' },
   ddayBadgeUrgent: { backgroundColor: '#ffecec' },
   ddayTextUrgent: { color: '#e74c3c' },
+  displayDateText: { fontSize: 11, color: '#95a5a6', marginTop: 5, marginRight: 10 },
   deleteBtn: { padding: 5 },
   emptyContainer: { marginTop: 50, alignItems: 'center' },
   emptyText: { fontSize: 16, color: '#7f8c8d', textAlign: 'center', lineHeight: 24 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
-  modalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '75%', maxHeight: Platform.OS === 'web' ? 720 : '100%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: Platform.OS === 'web' ? 30 : 0, borderBottomRightRadius: Platform.OS === 'web' ? 30 : 0, padding: 25, alignItems: 'flex-start' },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50', marginBottom: 20, alignSelf: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalContent: { width: '100%', height: '75%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, alignSelf: 'center' },
   sectionSubtitle: { fontSize: 15, fontWeight: 'bold', color: '#34495e', marginTop: 15, marginBottom: 10 },
   modalInput: { backgroundColor: '#f1f2f6', padding: 15, borderRadius: 10, fontSize: 16, color: '#2c3e50', marginBottom: 10 },
   chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
@@ -277,12 +279,11 @@ const styles = StyleSheet.create({
   activeChip: { backgroundColor: '#3498db', borderColor: '#3498db' },
   chipText: { color: '#7f8c8d', fontSize: 13, fontWeight: '600' },
   activeChipText: { color: '#fff', fontWeight: 'bold' },
-  amountContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f2f6', alignSelf: 'flex-start', borderRadius: 12, padding: 5 },
-  amountBtn: { backgroundColor: '#fff', padding: 10, borderRadius: 8, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-  amountText: { fontSize: 18, fontWeight: 'bold', paddingHorizontal: 20, color: '#2c3e50' },
+  datePickerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f2f6', padding: 15, borderRadius: 10 },
+  datePickerText: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50' },
   modalButtonGroup: { flexDirection: 'row', width: '100%', marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderColor: '#eee' },
   closeBtn: { flex: 0.3, padding: 15, alignItems: 'center' },
   closeBtnText: { color: '#95a5a6', fontSize: 16, fontWeight: 'bold' },
   submitBtn: { flex: 0.7, backgroundColor: '#2ecc71', padding: 15, borderRadius: 12, alignItems: 'center' },
   submitBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
-}); 
+});

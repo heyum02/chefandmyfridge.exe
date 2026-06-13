@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { useUserStore } from '../store/useUserStore';
+
+// 통신 본부에서 회원가입 API를 가져옴
+import { signupAPI } from '../services/api';
 
 const toolCategories = {
   "🔥 가열 기구": ["가스레인지", "인덕션", "오븐", "전자레인지", "에어프라이어", "밥솥", "전기팬", "전기밥솥", "토치"],
@@ -18,14 +20,9 @@ export default function SignUpScreen({ onGoToLogin }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  
-  // 💡 비밀번호와 비밀번호 확인을 각각 제어하기 위한 상태
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  const saveEmail = useUserStore((state) => state.setEmail);
-  const saveNickname = useUserStore((state) => state.setNickname);
-  const setInitialProfile = useUserStore((state) => state.setInitialProfile);
 
   const [selectedAllergies, setSelectedAllergies] = useState([]);
   const [selectedTools, setSelectedTools] = useState([]);
@@ -36,24 +33,34 @@ export default function SignUpScreen({ onGoToLogin }) {
     else setList([...list, item]);
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!email || !nickname || !password || !confirmPassword) { setErrorMessage('모든 항목을 빠짐없이 입력해주세요.'); return; }
     if (!email.includes('@')) { setErrorMessage('유효한 이메일 형식이 아닙니다.'); return; }
     if (password !== confirmPassword) { setErrorMessage('비밀번호가 서로 일치하지 않습니다.'); return; }
 
-    saveEmail(email);
-    saveNickname(nickname);
-    setInitialProfile({
-      allergies: selectedAllergies,
-      kitchenTools: selectedTools,
-      tastes: { spicy: 3, salty: 3, sweet: 3, bitter: 3, sour: 3, savory: 3 } 
-    });
+    try {
+      // [방어 코드] 혹시라도 이상한 값이 섞일까 봐 안전하게 한 번 더 필터링
+      const safeAllergies = selectedAllergies.filter(item => item !== null && item !== undefined);
+      const safeTools = selectedTools.filter(item => item !== null && item !== undefined);
 
-    if (Platform.OS === 'web') {
-      window.alert(`가입 완료 🎉\n${nickname}님 환영합니다!`);
-      onGoToLogin(); 
-    } else {
-      Alert.alert('가입 완료 🎉', `${nickname}님 환영합니다!`, [{ text: '확인', onPress: onGoToLogin }]);
+      // 데이터를 포장해 서버로 쏨
+      await signupAPI({
+        email: email,
+        nickname: nickname,
+        password: password,
+        allergies: selectedAllergies || [],
+        kitchenTools: selectedTools || [],
+        tastes: { spicy: 3, salty: 3, sweet: 3, bitter: 3, sour: 3, savory: 3 }
+      });
+
+      if (Platform.OS === 'web') {
+        window.alert(`가입 완료 🎉\n${nickname}님 환영합니다! 로그인을 진행해주세요.`);
+        onGoToLogin();
+      } else {
+        Alert.alert('가입 완료 🎉', `${nickname}님 환영합니다! 로그인을 진행해주세요.`, [{ text: '확인', onPress: onGoToLogin }]);
+      }
+    } catch (error) {
+      setErrorMessage(error.response?.data?.error || '회원가입 중 서버 오류가 발생했습니다.');
     }
   };
 
@@ -63,14 +70,14 @@ export default function SignUpScreen({ onGoToLogin }) {
         <Ionicons name="arrow-back" size={28} color="#2c3e50" />
       </TouchableOpacity>
       <Text style={styles.title}>회원가입</Text>
-      
+
       <View style={styles.inputBox}>
         <Text style={styles.label}>이메일</Text>
-        <TextInput style={styles.input} placeholder="example@email.com" keyboardType="email-address" value={email} onChangeText={setEmail} />
-        
+        <TextInput style={styles.input} placeholder="example@email.com" keyboardType="email-address" value={email} onChangeText={setEmail} autoCapitalize="none" />
+
         <Text style={styles.label}>닉네임</Text>
         <TextInput style={styles.input} placeholder="사용하실 닉네임을 입력해주세요" value={nickname} onChangeText={setNicknameInput} />
-        
+
         <Text style={styles.label}>비밀번호</Text>
         <View style={styles.passwordInputWrapper}>
           <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="8자리 이상 영문, 숫자 조합" secureTextEntry={!showPassword} value={password} onChangeText={setPassword} />
@@ -80,7 +87,6 @@ export default function SignUpScreen({ onGoToLogin }) {
         </View>
 
         <Text style={styles.label}>비밀번호 확인</Text>
-        {/* 💡 비밀번호 확인 칸에도 눈 아이콘 추가 */}
         <View style={styles.passwordInputWrapper}>
           <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="비밀번호를 다시 입력해주세요" secureTextEntry={!showConfirmPassword} value={confirmPassword} onChangeText={setConfirmPassword} />
           <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeIcon}>
@@ -89,7 +95,7 @@ export default function SignUpScreen({ onGoToLogin }) {
         </View>
 
         <Text style={styles.sectionTitle}>🍽️ 나만의 맞춤 설정</Text>
-        
+
         <Text style={styles.subLabel}>못 먹는 식재료 (알러지)</Text>
         <View style={styles.chipContainer}>
           {allergyOptions.map((item) => (
@@ -99,7 +105,6 @@ export default function SignUpScreen({ onGoToLogin }) {
           ))}
         </View>
 
-        {/* 💡 여백이 조정된 주방 도구 라벨 */}
         <Text style={styles.toolLabel}>우리 집 주방 도구</Text>
         {Object.entries(toolCategories).map(([categoryName, tools]) => (
           <View key={categoryName} style={{ marginBottom: 15 }}>
@@ -135,10 +140,7 @@ const styles = StyleSheet.create({
   eyeIcon: { paddingHorizontal: 15 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#2ecc71', marginTop: 10, marginBottom: 20, borderTopWidth: 1, borderTopColor: '#f1f2f6', paddingTop: 20 },
   subLabel: { fontSize: 15, fontWeight: 'bold', color: '#7f8c8d', marginBottom: 10 },
-  
-  // 💡 주방 도구 라벨 전용 스타일 (위아래 여백 추가)
   toolLabel: { fontSize: 15, fontWeight: 'bold', color: '#7f8c8d', marginTop: 25, marginBottom: 15 },
-  
   chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { backgroundColor: '#f1f2f6', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: '#ecf0f1' },
   activeChip: { backgroundColor: '#2ecc71', borderColor: '#2ecc71' },

@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+import { updateProfileAPI } from '../services/api';
 import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 
-// 💡 주방도구 카테고리 동기화
 const toolCategories = {
   "🔥 가열 기구": ["가스레인지", "인덕션", "오븐", "전자레인지", "에어프라이어", "밥솥", "전기팬", "전기밥솥", "토치"],
   "🍳 팬/냄비": ["냄비", "프라이팬", "주물팬", "달걀말이팬", "오븐팬", "베이킹팬", "머핀팬", "와플팬", "쿠킹팬"],
@@ -19,25 +20,30 @@ export default function MyPageScreen({ onLogout }) {
   const email = useUserStore((state) => state.email);
   const clearUser = useUserStore((state) => state.clearUser);
   const ingredients = useFridgeStore((state) => state.ingredients);
-  const clearFridge = useFridgeStore((state) => state.clearFridge); 
+  const clearFridge = useFridgeStore((state) => state.clearFridge);
   const userProfile = useUserStore((state) => state.userProfile);
   const updateFullProfile = useUserStore((state) => state.updateFullProfile);
 
+  const triedRecipes = useUserStore((state) => state.triedRecipes || []);
+  const bookmarkedRecipes = triedRecipes.filter(r => r.isBookmark);
+
   const [modalVisible, setModalVisible] = useState(false);
+  const [bookmarkListVisible, setBookmarkListVisible] = useState(false);
+
   const [tempAllergies, setTempAllergies] = useState([]);
   const [tempTools, setTempTools] = useState([]);
   const [tempTastes, setTempTastes] = useState({ spicy: 3, salty: 3, sweet: 3, bitter: 3, sour: 3, savory: 3 });
 
   const handleLogout = () => {
-    clearUser();   
-    clearFridge(); 
-    onLogout();    
+    clearUser();
+    clearFridge();
+    onLogout();
   };
 
   const openProfileModal = () => {
-    setTempAllergies(userProfile.allergies);
-    setTempTools(userProfile.kitchenTools);
-    setTempTastes({ 
+    setTempAllergies(userProfile.allergies || []);
+    setTempTools(userProfile.kitchenTools || []);
+    setTempTastes({
       spicy: userProfile.tastes?.spicy || 3, salty: userProfile.tastes?.salty || 3, sweet: userProfile.tastes?.sweet || 3,
       bitter: userProfile.tastes?.bitter || 3, sour: userProfile.tastes?.sour || 3, savory: userProfile.tastes?.savory || 3,
     });
@@ -49,11 +55,23 @@ export default function MyPageScreen({ onLogout }) {
     else setList([...list, item]);
   };
 
-  const handleSaveProfile = () => {
-    updateFullProfile({ allergies: tempAllergies, kitchenTools: tempTools, tastes: tempTastes });
-    setModalVisible(false);
-    if(Platform.OS === 'web') window.alert('업데이트 완료\n맞춤 설정이 안전하게 변경되었습니다!');
-    else Alert.alert('업데이트 완료', '맞춤 설정이 안전하게 변경되었습니다!');
+  const handleSaveProfile = async () => {
+    try {
+      await updateProfileAPI({
+        allergies: tempAllergies,
+        kitchenTools: tempTools,
+        tastes: tempTastes
+      });
+
+      updateFullProfile({ allergies: tempAllergies, kitchenTools: tempTools, tastes: tempTastes });
+      setModalVisible(false);
+
+      if (Platform.OS === 'web') window.alert('업데이트 완료\n맞춤 설정이 안전하게 변경되었습니다!');
+      else Alert.alert('업데이트 완료', '맞춤 설정이 안전하게 변경되었습니다!');
+    } catch (error) {
+      console.error(error);
+      Alert.alert('통신 오류', '서버에 설정을 저장하지 못했습니다.');
+    }
   };
 
   const allergyOptions = ['난류', '우유', '땅콩', '대두', '밀', '생선', '갑각류'];
@@ -81,20 +99,22 @@ export default function MyPageScreen({ onLogout }) {
         <View style={styles.avatar}><Ionicons name="person" size={40} color="#bdc3c7" /></View>
         <View style={styles.profileInfo}>
           <Text style={styles.userName}>{nickname} 님</Text>
-          <Text style={styles.userEmail}>{email}</Text> 
+          <Text style={styles.userEmail}>{email}</Text>
         </View>
       </View>
+
       <View style={styles.statsCard}>
         <View style={styles.statItem}>
           <Text style={styles.statNumber}>{ingredients.length}</Text>
           <Text style={styles.statLabel}>구출한 식재료</Text>
         </View>
         <View style={styles.separator} />
-        <View style={styles.statItem}>
-          <Text style={styles.statNumber}>5</Text>
-          <Text style={styles.statLabel}>저장한 레시피</Text>
-        </View>
+        <TouchableOpacity style={styles.statItem} onPress={() => setBookmarkListVisible(true)}>
+          <Text style={styles.statNumber}>{bookmarkedRecipes.length}</Text>
+          <Text style={styles.statLabel}>즐겨찾기 레시피</Text>
+        </TouchableOpacity>
       </View>
+
       <View style={styles.menuList}>
         <TouchableOpacity style={styles.menuItem} onPress={openProfileModal}>
           <View style={styles.menuLeft}>
@@ -107,6 +127,31 @@ export default function MyPageScreen({ onLogout }) {
           <Text style={styles.logoutText}>로그아웃</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal animationType="slide" transparent={true} visible={bookmarkListVisible} onRequestClose={() => setBookmarkListVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '70%' }]}>
+            <Text style={styles.modalTitle}>💛 내 즐겨찾기 레시피</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%', paddingHorizontal: 10 }}>
+              {bookmarkedRecipes.length > 0 ? (
+                bookmarkedRecipes.map(r => (
+                  <View key={r.id} style={styles.bookmarkItem}>
+                    <Text style={styles.bookmarkName}>{r.name}</Text>
+                    <Ionicons name="bookmark" size={24} color="#f1c40f" />
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.emptyText}>아직 즐겨찾기한 레시피가 없습니다.</Text>
+              )}
+            </ScrollView>
+
+            {/* 💡 [수정] 닫기 버튼 크기 예쁘게 고정 */}
+            <TouchableOpacity style={styles.bookmarkCloseBtn} onPress={() => setBookmarkListVisible(false)}>
+              <Text style={styles.bookmarkCloseBtnText}>닫기</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
@@ -121,8 +166,7 @@ export default function MyPageScreen({ onLogout }) {
                   </TouchableOpacity>
                 ))}
               </View>
-              
-              {/* 💡 주방 도구 카테고리화 렌더링 */}
+
               <Text style={styles.sectionSubtitle}>🍳 주방 도구</Text>
               {Object.entries(toolCategories).map(([categoryName, tools]) => (
                 <View key={categoryName} style={{ marginBottom: 15 }}>
@@ -171,6 +215,15 @@ const styles = StyleSheet.create({
   statNumber: { fontSize: 24, fontWeight: 'bold', color: '#2ecc71', marginBottom: 5 },
   statLabel: { fontSize: 13, color: '#7f8c8d' },
   separator: { width: 1, backgroundColor: '#ecf0f1' },
+
+  bookmarkItem: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#f8f9fa', padding: 18, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#eee' },
+  bookmarkName: { fontSize: 16, fontWeight: '600', color: '#2c3e50' },
+  emptyText: { textAlign: 'center', color: '#95a5a6', marginVertical: 30, fontSize: 15 },
+
+  // 💡 버튼 크기 고정 스타일
+  bookmarkCloseBtn: { width: '100%', backgroundColor: '#2ecc71', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 15 },
+  bookmarkCloseBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
   menuList: { backgroundColor: '#fff', paddingHorizontal: 20, paddingBottom: 40 },
   menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: '#f1f2f6' },
   menuLeft: { flexDirection: 'row', alignItems: 'center' },
@@ -178,9 +231,9 @@ const styles = StyleSheet.create({
   logoutBtn: { marginTop: 30, alignItems: 'center', padding: 15, backgroundColor: '#ffecec', borderRadius: 10 },
   logoutText: { color: '#e74c3c', fontWeight: 'bold', fontSize: 16 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end', alignItems: Platform.OS === 'web' ? 'center' : 'stretch' },
-  modalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '85%', maxHeight: Platform.OS === 'web' ? 720 : '100%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: Platform.OS === 'web' ? 30 : 0, borderBottomRightRadius: Platform.OS === 'web' ? 30 : 0, padding: 25, alignItems: 'flex-start' },
+  modalContent: { width: '100%', maxWidth: Platform.OS === 'web' ? 400 : '100%', height: '85%', maxHeight: Platform.OS === 'web' ? 720 : '100%', backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: Platform.OS === 'web' ? 30 : 0, borderBottomRightRadius: Platform.OS === 'web' ? 30 : 0, padding: 25, alignItems: 'center' },
   modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50', marginBottom: 20, alignSelf: 'center' },
-  sectionSubtitle: { fontSize: 16, fontWeight: 'bold', color: '#34495e', marginTop: 15, marginBottom: 10 },
+  sectionSubtitle: { fontSize: 16, fontWeight: 'bold', color: '#34495e', marginTop: 15, marginBottom: 10, alignSelf: 'flex-start' },
   chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { backgroundColor: '#f1f2f6', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 },
   activeChip: { backgroundColor: '#2ecc71' },
