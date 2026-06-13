@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, SectionList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFridgeStore } from '../store/useFridgeStore';
 
 const getCategoryIcon = (category) => {
@@ -11,9 +12,26 @@ const getCategoryIcon = (category) => {
   }
 };
 
+// 💡 [핵심 해결] 백엔드에서 온 UTC 시간을 한국 시간(로컬)으로 똑똑하게 변환!
+const cleanDateString = (dateStr) => {
+  if (!dateStr) return null;
+  const d = new Date(dateStr); // 긴 날짜 문자열을 실제 시간 객체로 변환
+  if (isNaN(d.getTime())) return null; // 에러 방지
+
+  let month = '' + (d.getMonth() + 1);
+  let day = '' + d.getDate();
+  const year = d.getFullYear();
+  if (month.length < 2) month = '0' + month;
+  if (day.length < 2) day = '0' + day;
+
+  return [year, month, day].join('-'); // 정확한 로컬 시간 YYYY-MM-DD 반환
+};
+
 const calculateDday = (dateString) => {
-  if (!dateString) return null;
-  const target = new Date(dateString);
+  const cleanDate = cleanDateString(dateString);
+  if (!cleanDate) return null;
+
+  const target = new Date(cleanDate);
   const today = new Date();
   target.setHours(0, 0, 0, 0);
   today.setHours(0, 0, 0, 0);
@@ -21,36 +39,34 @@ const calculateDday = (dateString) => {
   return Math.round(diffTime / (1000 * 60 * 60 * 24));
 };
 
-const formatDate = (date) => {
+const formatDateToDot = (date) => {
   const d = new Date(date);
   let month = '' + (d.getMonth() + 1);
   let day = '' + d.getDate();
   const year = d.getFullYear();
   if (month.length < 2) month = '0' + month;
   if (day.length < 2) day = '0' + day;
-  return [year, month, day].join('-');
+  return [year, month, day].join('.');
 };
 
 export default function InventoryScreen() {
   const ingredients = useFridgeStore((state) => state.ingredients);
   const fetchIngredients = useFridgeStore((state) => state.fetchIngredients);
-
-  useEffect(() => {
-    fetchIngredients();
-  }, []);
-
   const addIngredient = useFridgeStore((state) => state.addIngredient);
   const removeIngredient = useFridgeStore((state) => state.removeIngredient);
   const updateIngredient = useFridgeStore((state) => state.updateIngredient);
 
+  useEffect(() => { fetchIngredients(); }, []);
+
   const [modalVisible, setModalVisible] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingId, setEditingId] = useState(null);
-
   const [inputText, setInputText] = useState('');
-  const [amount, setAmount] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState('기타');
-  const [daysLeft, setDaysLeft] = useState(7);
+  const [expiryDate, setExpiryDate] = useState(new Date());
+
+  // 달력 모달 표시 여부
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const categories = ['채소', '과일', '육류', '수산물', '유제품/계란', '양념/소스', '가공/냉동', '기타'];
 
@@ -76,17 +92,10 @@ export default function InventoryScreen() {
   });
 
   const sections = [];
-  if (urgentItems.length > 0) {
-    sections.push({ title: '🚨 유통기한 임박 (3일 이내)', data: urgentItems, isUrgent: true });
-  }
-
+  if (urgentItems.length > 0) sections.push({ title: '🚨 유통기한 임박 (3일 이내)', data: urgentItems, isUrgent: true });
   categories.forEach(cat => {
     if (categorizedItems[cat] && categorizedItems[cat].length > 0) {
-      sections.push({
-        title: `${getCategoryIcon(cat)} ${cat}`,
-        data: categorizedItems[cat],
-        isUrgent: false
-      });
+      sections.push({ title: `${getCategoryIcon(cat)} ${cat}`, data: categorizedItems[cat], isUrgent: false });
     }
   });
 
@@ -94,9 +103,9 @@ export default function InventoryScreen() {
     setIsEditMode(false);
     setEditingId(null);
     setInputText('');
-    setAmount(1);
     setSelectedCategory('기타');
-    setDaysLeft(7);
+    setExpiryDate(new Date());
+    setShowDatePicker(false);
     setModalVisible(true);
   };
 
@@ -104,27 +113,33 @@ export default function InventoryScreen() {
     setIsEditMode(true);
     setEditingId(item.id);
     setInputText(item.name);
-    setAmount(item.amount);
     setSelectedCategory(item.category || '기타');
 
-    const currentDday = calculateDday(item.expiryDate);
-    setDaysLeft(currentDday !== null ? currentDday : 7);
-
+    const cleanDate = cleanDateString(item.expiryDate);
+    setExpiryDate(cleanDate ? new Date(cleanDate) : new Date());
+    setShowDatePicker(false);
     setModalVisible(true);
   };
 
-  const handleAmountChange = (value, setter, state) => { setter(Math.max(1, state + value)); };
+  const handleDateChange = (event, selectedDate) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false); // 안드로이드는 선택하면 달력 닫기
+    }
+    if (selectedDate) {
+      setExpiryDate(selectedDate);
+    }
+  };
 
   const handleSubmit = () => {
     if (inputText.trim() === '') { Alert.alert('알림', '식재료 이름을 입력해주세요!'); return; }
-    const today = new Date();
-    today.setDate(today.getDate() + Number(daysLeft));
-    const formattedDate = formatDate(today);
+
+    // DB에는 표준 형식(YYYY-MM-DD)으로 보냅니다.
+    const dbFormattedDate = formatDateToDot(expiryDate).replace(/\./g, '-');
 
     if (isEditMode) {
-      updateIngredient(editingId, { name: inputText, amount, category: selectedCategory, expiryDate: formattedDate });
+      updateIngredient(editingId, { name: inputText, amount: 1, category: selectedCategory, expiryDate: dbFormattedDate });
     } else {
-      addIngredient({ id: Date.now().toString(), name: inputText, amount, unit: '개', category: selectedCategory, expiryDate: formattedDate });
+      addIngredient({ id: Date.now().toString(), name: inputText, amount: 1, unit: '개', category: selectedCategory, expiryDate: dbFormattedDate });
     }
     setModalVisible(false);
   };
@@ -143,8 +158,11 @@ export default function InventoryScreen() {
         sections={sections}
         keyExtractor={(item, index) => item?.id ? String(item.id) : String(index)}
         renderItem={({ item }) => {
-          const dDay = calculateDday(item.expiryDate);
+          const cleanDate = cleanDateString(item.expiryDate);
+          const formattedDisplayDate = cleanDate ? cleanDate.replace(/-/g, '.') : '';
+          const dDay = calculateDday(cleanDate);
           const isUrgent = dDay !== null && dDay <= 3;
+
           return (
             <View style={styles.card}>
               <Text style={styles.icon}>{getCategoryIcon(item.category)}</Text>
@@ -152,12 +170,16 @@ export default function InventoryScreen() {
                 <Text style={styles.name}>{item.name}</Text>
                 <Text style={styles.categoryText}>{item.category} (터치하여 수정)</Text>
               </TouchableOpacity>
-              <View style={styles.badge}><Text style={styles.badgeText}>{item.amount} {item.unit}</Text></View>
-              <View style={[styles.ddayBadge, isUrgent && styles.ddayBadgeUrgent]}>
-                <Text style={[styles.ddayText, isUrgent && styles.ddayTextUrgent]}>
-                  {dDay !== null ? (dDay < 0 ? `D+${Math.abs(dDay)}` : dDay === 0 ? 'D-Day' : `D-${dDay}`) : '기한 모름'}
-                </Text>
+
+              <View style={{ alignItems: 'flex-end' }}>
+                <View style={[styles.ddayBadge, isUrgent && styles.ddayBadgeUrgent]}>
+                  <Text style={[styles.ddayText, isUrgent && styles.ddayTextUrgent]}>
+                    {dDay !== null ? (dDay < 0 ? `D+${Math.abs(dDay)}` : dDay === 0 ? 'D-Day' : `D-${dDay}`) : '기한 모름'}
+                  </Text>
+                </View>
+                {formattedDisplayDate !== '' && <Text style={styles.displayDateText}>{formattedDisplayDate} 까지</Text>}
               </View>
+
               <TouchableOpacity style={styles.deleteBtn} onPress={() => removeIngredient(item.id)}><Ionicons name="trash-outline" size={24} color="#ff7675" /></TouchableOpacity>
             </View>
           );
@@ -180,6 +202,7 @@ export default function InventoryScreen() {
               <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
                 <Text style={styles.sectionSubtitle}>🏷️ 식재료 이름</Text>
                 <TextInput style={styles.modalInput} placeholder="예: 사과, 대파" value={inputText} onChangeText={setInputText} />
+
                 <Text style={styles.sectionSubtitle}>분류 카테고리</Text>
                 <View style={styles.chipContainer}>
                   {categories.map((cat) => (
@@ -188,19 +211,26 @@ export default function InventoryScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                <Text style={styles.sectionSubtitle}>🔢 수량 (개)</Text>
-                <View style={styles.amountContainer}>
-                  <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(-1, setAmount, amount)}><Ionicons name="remove" size={24} color="#2c3e50" /></TouchableOpacity>
-                  <Text style={styles.amountText}>{amount}</Text>
-                  <TouchableOpacity style={styles.amountBtn} onPress={() => handleAmountChange(1, setAmount, amount)}><Ionicons name="add" size={24} color="#2c3e50" /></TouchableOpacity>
-                </View>
-                <Text style={styles.sectionSubtitle}>⏳ 소비기한 (며칠 남았나요?)</Text>
-                <View style={styles.amountContainer}>
-                  <TouchableOpacity style={styles.amountBtn} onPress={() => setDaysLeft(prev => Math.max(0, Number(prev) - 1))}><Ionicons name="remove" size={24} color="#2c3e50" /></TouchableOpacity>
-                  <TextInput style={styles.expiryInput} value={String(daysLeft)} onChangeText={(text) => setDaysLeft(text.replace(/[^0-9]/g, ''))} keyboardType="numeric" />
-                  <Text style={{ fontSize: 16, fontWeight: 'bold' }}>일 남음</Text>
-                  <TouchableOpacity style={styles.amountBtn} onPress={() => setDaysLeft(prev => Number(prev) + 1)}><Ionicons name="add" size={24} color="#2c3e50" /></TouchableOpacity>
-                </View>
+
+                <Text style={styles.sectionSubtitle}>⏳ 소비기한 선택</Text>
+                <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(!showDatePicker)}>
+                  <Ionicons name="calendar-outline" size={20} color="#34495e" style={{ marginRight: 10 }} />
+                  <Text style={styles.datePickerText}>{formatDateToDot(expiryDate)}</Text>
+                  <Ionicons name={showDatePicker ? "chevron-up" : "chevron-down"} size={20} color="#95a5a6" style={{ marginLeft: 'auto' }} />
+                </TouchableOpacity>
+
+                {/* 💡 [핵심 해결] iOS는 펼쳐진 달력(inline)으로 즉시 렌더링 */}
+                {showDatePicker && (
+                  <View style={Platform.OS === 'ios' ? { backgroundColor: '#fff', borderRadius: 10, marginTop: 10, padding: 10 } : {}}>
+                    <DateTimePicker
+                      value={expiryDate}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                      onChange={handleDateChange}
+                    />
+                  </View>
+                )}
+
               </ScrollView>
               <View style={styles.modalButtonGroup}>
                 <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}><Text style={styles.closeBtnText}>취소</Text></TouchableOpacity>
@@ -231,12 +261,11 @@ const styles = StyleSheet.create({
   infoContainer: { flex: 1 },
   name: { fontSize: 18, fontWeight: '600', color: '#2c3e50' },
   categoryText: { fontSize: 12, color: '#95a5a6', marginTop: 3 },
-  badge: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#f1f2f6', marginRight: 10 },
-  badgeText: { fontSize: 15, fontWeight: 'bold', color: '#2c3e50' },
-  ddayBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#ecf0f1', marginRight: 10 },
+  ddayBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#ecf0f1', marginRight: 10, alignSelf: 'flex-end' },
   ddayText: { fontSize: 13, fontWeight: 'bold', color: '#7f8c8d' },
   ddayBadgeUrgent: { backgroundColor: '#ffecec' },
   ddayTextUrgent: { color: '#e74c3c' },
+  displayDateText: { fontSize: 11, color: '#95a5a6', marginTop: 5, marginRight: 10 },
   deleteBtn: { padding: 5 },
   emptyContainer: { marginTop: 50, alignItems: 'center' },
   emptyText: { fontSize: 16, color: '#7f8c8d', textAlign: 'center', lineHeight: 24 },
@@ -250,10 +279,8 @@ const styles = StyleSheet.create({
   activeChip: { backgroundColor: '#3498db', borderColor: '#3498db' },
   chipText: { color: '#7f8c8d', fontSize: 13, fontWeight: '600' },
   activeChipText: { color: '#fff', fontWeight: 'bold' },
-  amountContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f2f6', alignSelf: 'flex-start', borderRadius: 12, padding: 5 },
-  amountBtn: { backgroundColor: '#fff', padding: 10, borderRadius: 8, elevation: 1 },
-  amountText: { fontSize: 18, fontWeight: 'bold', paddingHorizontal: 20, color: '#2c3e50' },
-  expiryInput: { fontSize: 18, fontWeight: 'bold', paddingHorizontal: 15, textAlign: 'center', width: 60, color: '#2c3e50' },
+  datePickerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f2f6', padding: 15, borderRadius: 10 },
+  datePickerText: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50' },
   modalButtonGroup: { flexDirection: 'row', width: '100%', marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderColor: '#eee' },
   closeBtn: { flex: 0.3, padding: 15, alignItems: 'center' },
   closeBtnText: { color: '#95a5a6', fontSize: 16, fontWeight: 'bold' },
