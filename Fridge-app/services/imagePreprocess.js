@@ -8,9 +8,6 @@ export const preprocessImage = async (imageUri, isReceipt = false) => {
 
         const result = await ImageManipulator.manipulateAsync(imageUri, actions, { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG });
 
-        console.log('이미지 전처리 성공');
-        console.log('최적화된 해상도: ', `${result.width}x${result.height}`);
-        console.log('=========================================');
         return result.uri;
     } catch (error) {
         console.error('이미지 전처리 실패: ', error);

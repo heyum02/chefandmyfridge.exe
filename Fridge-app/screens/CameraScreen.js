@@ -10,26 +10,9 @@ import { useFridgeStore } from '../store/useFridgeStore';
 import { useUserStore } from '../store/useUserStore';
 import { preprocessImage } from '../services/imagePreprocess';
 import { checkVisionAnalysisResult } from "../services/validationUtils";
+import { calculateExpirationDate, calculateDaysLeft, formatDate } from "../services/expiryUtils";
 
 const screenWidth = Dimensions.get('window').width;
-
-const formatDate = (date) => {
-  const d = new Date(date);
-  let month = '' + (d.getMonth() + 1);
-  let day = '' + d.getDate();
-  const year = d.getFullYear();
-  if (month.length < 2) month = '0' + month;
-  if (day.length < 2) day = '0' + day;
-  return [year, month, day].join('-');
-};
-
-// 💡 날짜를 받아서 '며칠 남았는지(D-Day)' 계산해주는 함수
-const calculateDaysLeft = (expiryDateStr) => {
-  const target = new Date(expiryDateStr);
-  const today = new Date();
-  target.setHours(0, 0, 0, 0); today.setHours(0, 0, 0, 0);
-  return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
-};
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -89,38 +72,28 @@ export default function CameraScreen() {
     try {
       setIsLoading(true);
 
-      // 전처리 테스트용 시간 측정 시작 - 배포시 삭제
-      // 콘솔 로그도 배포시 삭제 예정.
-      const startTime = Date.now();
-
-      console.log('--- 이미지 전처리 시작 ---');
       const preprocessedUris = await Promise.all(photoUris.map(async (uri) => {
         const optimizedUri = await preprocessImage(uri);
         return optimizedUri;
       }));
-      console.log('--- 이미지 전처리 완료 ---');
 
-      //전처리 적용
       const result = await analyzeIngredients(preprocessedUris);
 
-      // 테스트용 시간 측정 완료 - 배포시 삭제
-      const endTime = Date.now();
-      const duration = ((endTime - startTime) / 1000).toFixed(2);
-      console.log(`Gemini 분석 시간: ${duration} 초`);
-
       const today = new Date();
-      const defaultExpiryDate = new Date(today);
-      defaultExpiryDate.setDate(today.getDate() + 7);
-      const defaultExpiryStr = formatDate(defaultExpiryDate);
 
-      const processedData = result.map(item => ({
-        name: item.name,
-        amount: isNaN(Number(item.amount)) ? 1 : Number(item.amount),
-        unit: item.unit || '개',
-        // 💡 AI가 분류를 못해서 'Unknown'으로 오면 일단 그대로 둡니다. (유저가 화면에서 보고 고치게 유도)
-        category: item.category || 'Unknown',
-        expiryDate: item.expiryDate || defaultExpiryStr,
-      }));
+      const processedData = result.map(item => {
+        const itemCategory = item.category || 'Unknown';
+
+        const purchaseDate = item.base_date || formatDate(today);
+        const calculatedExpiry = calculateExpirationDate(item.name, itemCategory, purchaseDate);
+
+        const daysLeft = calculateDaysLeft(calculatedExpiry);
+        return {
+          name: item.name,
+          category: itemCategory,
+          expiryDate: calculatedExpiry,
+        };
+      });
 
       const validation = checkVisionAnalysisResult(0, processedData);
 
@@ -131,12 +104,13 @@ export default function CameraScreen() {
 
       if (validation.status === 'SUCCESS' && validation.extractedItems.length > 0) {
         // 💡 [수정됨] Alert 대신 모달을 띄우고 결과값을 상태에 저장합니다!
-        setAnalyzedResults(validation.extractedItems);
+        setAnalyzedResults(processedData);
         setShowReviewModal(true);
       } else {
         Alert.alert('분석 실패', '식재료를 인식하지 못했습니다. 다시 촬영해 주세요.');
       }
     } catch (error) {
+      console.error("에러: ", error);
       Alert.alert('분석 실패', '식재료 분석 중 오류가 발생했습니다. 다시 시도해주세요.');
     } finally {
       setIsLoading(false);
@@ -147,6 +121,10 @@ export default function CameraScreen() {
   const updateResultItem = (index, key, value) => {
     const updated = [...analyzedResults];
     updated[index][key] = value;
+
+    if (key === 'category' && value !== 'Unknown') {
+      updated[index].expiryDate = calculateExpirationDate(updated[index].name, value, formatDate(new Date()));
+    }
     setAnalyzedResults(updated);
   };
 
