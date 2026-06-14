@@ -48,8 +48,8 @@ export default function SignUpScreen({ onGoToLogin }) {
         email: email,
         nickname: nickname,
         password: password,
-        allergies: selectedAllergies || [],
-        kitchenTools: selectedTools || [],
+        allergies: safeAllergies || [],
+        kitchenTools: safeTools || [],
         tastes: { spicy: 3, salty: 3, sweet: 3, bitter: 3, sour: 3, savory: 3 }
       });
 

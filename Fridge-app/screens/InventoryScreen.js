@@ -12,11 +12,11 @@ const getCategoryIcon = (category) => {
   }
 };
 
-// 💡 [핵심 해결] 백엔드에서 온 UTC 시간을 한국 시간(로컬)으로 똑똑하게 변환!
+// 백엔드에서 온 UTC 시간을 한국 시간(로컬)으로 똑똑하게 변환
 const cleanDateString = (dateStr) => {
   if (!dateStr) return null;
-  const d = new Date(dateStr); // 긴 날짜 문자열을 실제 시간 객체로 변환
-  if (isNaN(d.getTime())) return null; // 에러 방지
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
 
   let month = '' + (d.getMonth() + 1);
   let day = '' + d.getDate();
@@ -24,7 +24,7 @@ const cleanDateString = (dateStr) => {
   if (month.length < 2) month = '0' + month;
   if (day.length < 2) day = '0' + day;
 
-  return [year, month, day].join('-'); // 정확한 로컬 시간 YYYY-MM-DD 반환
+  return [year, month, day].join('-');
 };
 
 const calculateDday = (dateString) => {
@@ -65,7 +65,6 @@ export default function InventoryScreen() {
   const [selectedCategory, setSelectedCategory] = useState('기타');
   const [expiryDate, setExpiryDate] = useState(new Date());
 
-  // 달력 모달 표시 여부
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   const categories = ['채소', '과일', '육류', '수산물', '유제품/계란', '양념/소스', '가공/냉동', '기타'];
@@ -123,7 +122,7 @@ export default function InventoryScreen() {
 
   const handleDateChange = (event, selectedDate) => {
     if (Platform.OS === 'android') {
-      setShowDatePicker(false); // 안드로이드는 선택하면 달력 닫기
+      setShowDatePicker(false);
     }
     if (selectedDate) {
       setExpiryDate(selectedDate);
@@ -133,7 +132,6 @@ export default function InventoryScreen() {
   const handleSubmit = () => {
     if (inputText.trim() === '') { Alert.alert('알림', '식재료 이름을 입력해주세요!'); return; }
 
-    // DB에는 표준 형식(YYYY-MM-DD)으로 보냅니다.
     const dbFormattedDate = formatDateToDot(expiryDate).replace(/\./g, '-');
 
     if (isEditMode) {
@@ -146,7 +144,10 @@ export default function InventoryScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}><Text style={styles.headerTitle}>마이 냉장고 식재료</Text></View>
+      <View style={styles.header}>
+        {/* 💡 깔끔하게 원래 타이틀로 복구 */}
+        <Text style={styles.headerTitle}>마이 냉장고 식재료</Text>
+      </View>
       <View style={styles.topActionContainer}>
         <TouchableOpacity style={styles.openModalButton} onPress={openAddModal}>
           <Ionicons name="add-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
@@ -219,7 +220,6 @@ export default function InventoryScreen() {
                   <Ionicons name={showDatePicker ? "chevron-up" : "chevron-down"} size={20} color="#95a5a6" style={{ marginLeft: 'auto' }} />
                 </TouchableOpacity>
 
-                {/* 💡 [핵심 해결] iOS는 펼쳐진 달력(inline)으로 즉시 렌더링 */}
                 {showDatePicker && (
                   <View style={Platform.OS === 'ios' ? { backgroundColor: '#fff', borderRadius: 10, marginTop: 10, padding: 10 } : {}}>
                     <DateTimePicker
