@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// 로그인 API와 유저 정보를 저장할 스토어를 가져옴
 import { loginAPI } from '../services/api';
 import { useUserStore } from '../store/useUserStore';
 
@@ -13,9 +12,7 @@ export default function LoginScreen({ onLogin, onGoToSignUp }) {
   const [isAutoLogin, setIsAutoLogin] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // 전역 상태에 저장할 준비
-  const setNickname = useUserStore((state) => state.setNickname);
-  const saveEmail = useUserStore((state) => state.setEmail);
+  const setUser = useUserStore((state) => state.setUser);
   const updateFullProfile = useUserStore((state) => state.updateFullProfile);
 
   const handleLoginAttempt = async () => {
@@ -24,13 +21,18 @@ export default function LoginScreen({ onLogin, onGoToSignUp }) {
     setErrorMessage('');
 
     try {
-      // 진짜 백엔드 로그인 API를 호출
       const response = await loginAPI({ email, password });
       const data = response.data;
 
-      // 로그인 성공 시, 서버가 준 내 알러지/입맛/도구 정보를 스토어에 깔아줌
-      setNickname(data.nickname);
-      saveEmail(email);
+      // 💡 서버가 고쳐지면 정상적인 userId가 담기게 됩니다!
+      setUser({
+        userId: data.userId,
+        nickname: data.nickname,
+        email: email,
+        isPremium: data.isPremium,
+        freeCount: data.freeCount
+      });
+
       updateFullProfile({
         allergies: data.allergies || [],
         kitchenTools: data.kitchenTools || [],
@@ -43,7 +45,6 @@ export default function LoginScreen({ onLogin, onGoToSignUp }) {
       if (error.response && error.response.status === 401) {
         setErrorMessage('이메일이나 비밀번호가 일치하지 않습니다.');
       } else {
-        // 서버가 꺼져있을 때 테스트를 위한 임시 방어막 유지
         Alert.alert(
           '연결 실패',
           '서버에 도달하지 못했습니다. 서버가 켜져 있는지 확인해주세요.\n\n오프라인 모드로 강제 입장하시겠습니까?',

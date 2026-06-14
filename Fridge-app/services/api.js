@@ -19,8 +19,8 @@ export const api = axios.create({
 // [냉장고 관련 API 모음]
 // ==========================================
 
-// [API 1] 냉장고 전체 재고 조회
-export const getFridgeItems = () => api.get('/api/fridge');
+// 💡 [수정] API 1: 냉장고 전체 재고 조회 (유저 ID를 받아서 전송)
+export const getFridgeItems = (userId = 1) => api.get(`/api/fridge?userId=${userId}`);
 
 // [API 2] 식재료 수동 추가
 export const addFridgeItemAPI = (data) => api.post('/api/fridge/add', data);

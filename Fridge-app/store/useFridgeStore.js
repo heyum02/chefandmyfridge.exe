@@ -1,15 +1,21 @@
 import { create } from 'zustand';
 // 💡 방금 만든 통신 본부(api.js)에서 필요한 기능들을 수입해옵니다!
 import { addFridgeItemAPI, deleteFridgeItemAPI, getFridgeItems, updateExpiryDateAPI } from '../services/api';
+// 💡 [수정] 로그인한 유저 정보를 가져오기 위해 추가!
+import { useUserStore } from './useUserStore';
 
 export const useFridgeStore = create((set, get) => ({
   // 1. 우리 냉장고에 들어있는 재료 데이터
   ingredients: [],
 
-  // 💡 [새로 추가됨] 1.5. 서버에서 내 냉장고 데이터 싹 가져오기
+  // 1.5. 서버에서 내 냉장고 데이터 싹 가져오기
   fetchIngredients: async () => {
     try {
-      const response = await getFridgeItems(); 
+      // 💡 [수정] 로그인한 유저의 ID를 가져옵니다. (없으면 기본값 1)
+      const userId = useUserStore.getState().userId || 1;
+
+      // 💡 [수정] API 호출 시 유저 ID를 전달하여 내 냉장고만 가져오게 합니다!
+      const response = await getFridgeItems(userId);
       set({ ingredients: response.data });
     } catch (error) {
       console.error("서버에서 냉장고 데이터를 불러오는데 실패했습니다:", error);
@@ -23,8 +29,12 @@ export const useFridgeStore = create((set, get) => ({
       const safeCategory = newIngredient.category || '기타';
       const finalIngredient = { ...newIngredient, category: safeCategory };
 
+      // 💡 [수정] 재료를 추가할 때도 내 냉장고에 들어가도록 유저 ID를 같이 보냅니다!
+      const userId = useUserStore.getState().userId || 1;
+
       // 💡 [서버에 먼저 저장 요청]
       const response = await addFridgeItemAPI({
+        userId: userId, // 내 아이디 추가
         name: finalIngredient.name,
         category: finalIngredient.category,
         amount: finalIngredient.amount,
@@ -46,12 +56,12 @@ export const useFridgeStore = create((set, get) => ({
           // 이미 냉장고에 같은 재료가 있다면? -> 개수를 더해줍니다.
           const updatedIngredients = [...state.ingredients];
           updatedIngredients[existingIndex].amount += finalIngredient.amount;
-          
+
           // 💡 [철통 방어 2] 예전에 카테고리 없이 저장된 녀석이거나 '기타'였다면, 이번에 제대로 받아온 카테고리로 업데이트해 줍니다!
           if (!updatedIngredients[existingIndex].category || updatedIngredients[existingIndex].category === '기타') {
-             updatedIngredients[existingIndex].category = safeCategory;
+            updatedIngredients[existingIndex].category = safeCategory;
           }
-          
+
           return { ingredients: updatedIngredients };
         } else {
           // 완전히 새로운 재료라면 서버에서 받은 '진짜 ID'를 넣어서 맨 끝에 추가합니다.
@@ -70,10 +80,10 @@ export const useFridgeStore = create((set, get) => ({
     try {
       // 💡 서버에 먼저 지워달라고 요청
       await deleteFridgeItemAPI(ingredientId);
-      
+
       // 요청 성공 시 화면(상태)에서도 삭제
-      set((state) => ({ 
-        ingredients: state.ingredients.filter((item) => item.id !== ingredientId) 
+      set((state) => ({
+        ingredients: state.ingredients.filter((item) => item.id !== ingredientId)
       }));
     } catch (error) {
       console.error("식재료 삭제 실패:", error);
@@ -81,7 +91,7 @@ export const useFridgeStore = create((set, get) => ({
     }
   },
 
-  // 💡 3.5. 냉장고 재료 정보 수정 기능 (D-day 변경 시 사용 - 서버 통신 추가)
+  // 3.5. 냉장고 재료 정보 수정 기능 (D-day 변경 시 사용 - 서버 통신 추가)
   updateIngredient: async (id, updatedData) => {
     try {
       // 💡 소비기한이 변경된 경우 서버에 먼저 업데이트 요청
