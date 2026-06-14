@@ -1,4 +1,5 @@
 import json
+import re
 from collections import Counter, defaultdict
 from tqdm import tqdm
 
@@ -13,6 +14,121 @@ OUTPUT = "../data/substitution_network.json"
 # 🔥 1. 데이터 로드
 with open(INPUT, encoding="utf-8") as f:
     recipes = json.load(f)
+
+
+SPECIAL_PATTERN_REPLACEMENTS = [
+    (r"\([^)]*\)", ""),
+    (r"^집\s*", ""),
+    (r"^(고운|굵은|다진|송송|채썬|채 썬|썬|으깬)\s*", ""),
+    (r"(통조림)\s*", ""),
+    (r"\s*(간|간맞추기|데칠 때|데칠때|데칠용|맞게|맞게 가감|밑간용|선택|절일때|절임용)\s*$", ""),
+    (r"\s*(소량|약간|적당량|넉넉하게|살짝|취향껏|크게|작게)\s*$", ""),
+    (r"^(큰|작은|중간)\s*", ""),
+    (r"\s*(큰|작은|중간)\s*(것|거|크기|사이즈)?\s*$", ""),
+    (r"\s*[AB]\s*$", ""),
+    (r"\s+(salt|pepper)\s*$", ""),
+]
+
+SPECIAL_EXACT_REPLACEMENTS = {
+    "미림": "맛술",
+    "집고추장": "고추장",
+    "집된장": "된장",
+    "집간장": "간장",
+    "통마늘": "마늘",
+    "통생강": "생강",
+    "통삼겹": "삼겹살",
+    "통삼겹살": "삼겹살",
+    "오징어몸통": "오징어",
+    "오징어 몸통": "오징어",
+    "참치통조림": "참치",
+    "통조림참치": "참치",
+    "통조림 참치": "참치",
+    "골뱅이통조림": "골뱅이",
+    "골뱅이 통조림": "골뱅이",
+    "고등어통조림": "고등어",
+    "꽁치통조림": "꽁치",
+    "연어통조림": "연어",
+    "옥수수통조림": "옥수수",
+    "파인애플통조림": "파인애플",
+    "통조림햄": "햄",
+    "통조림 햄": "햄",
+    "닭가슴살통조림": "닭가슴살",
+    "소금 salt": "소금",
+    "소금 간": "소금",
+    "소금간": "소금",
+    "소금 간맞추기": "소금",
+    "소금 데칠 때": "소금",
+    "소금 데칠때": "소금",
+    "소금 데칠용": "소금",
+    "소금 맞게": "소금",
+    "소금 맞게 가감": "소금",
+    "소금 밑간용": "소금",
+    "소금 선택": "소금",
+    "소금 절일때": "소금",
+    "소금 절임용": "소금",
+    "소금 데치기용": "소금",
+    "소금 데침용": "소금",
+    "소금 세척용": "소금",
+    "소금 오이": "소금",
+    "맛술 또는 미림": "맛술",
+    "미림 또는 맛술": "맛술",
+    "맛술 미림": "맛술",
+    "미림 맛술": "맛술",
+    "맛술 또는 소주": "맛술",
+    "소주 또는 맛술": "맛술",
+    "맛술 또는 청주": "맛술",
+    "청주 또는 맛술": "맛술",
+    "생강술 또는 맛술": "맛술",
+    "생강술 맛술": "맛술",
+    "생강맛술": "맛술",
+    "소주 또는 청주": "청주",
+    "청주 또는 소주": "청주",
+}
+
+
+def normalize_ingredient(text):
+    if not text:
+        return ""
+
+    normalized = str(text).strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized_lower = normalized.lower()
+
+    if normalized in SPECIAL_EXACT_REPLACEMENTS:
+        return SPECIAL_EXACT_REPLACEMENTS[normalized]
+    if normalized_lower in SPECIAL_EXACT_REPLACEMENTS:
+        return SPECIAL_EXACT_REPLACEMENTS[normalized_lower]
+
+    for pattern, replacement in SPECIAL_PATTERN_REPLACEMENTS:
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+
+    normalized = normalized.strip(" ,./")
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized_lower = normalized.lower()
+
+    if normalized in SPECIAL_EXACT_REPLACEMENTS:
+        normalized = SPECIAL_EXACT_REPLACEMENTS[normalized]
+    elif normalized_lower in SPECIAL_EXACT_REPLACEMENTS:
+        normalized = SPECIAL_EXACT_REPLACEMENTS[normalized_lower]
+
+    return normalized
+
+
+normalized_recipes = []
+for recipe in recipes:
+    cleaned_recipe = []
+    seen = set()
+    for ingredient in recipe:
+        normalized = normalize_ingredient(ingredient)
+        if not normalized or normalized in seen:
+            continue
+        cleaned_recipe.append(normalized)
+        seen.add(normalized)
+
+    if len(cleaned_recipe) >= 2:
+        normalized_recipes.append(cleaned_recipe)
+
+recipes = normalized_recipes
 
 
 # 🔥 2. 빈도 계산
@@ -73,7 +189,7 @@ def get_category(ing):
         return "vegetable"
 
     # 양념/향신료
-    if any(x in ing for x in ["간장", "고추장", "된장", "소금", "설탕", "식초", "고춧가루", "후춧가루", "파우더", "가루", "허브", "바질", "파슬리", "시나몬", "머스타드", "소스", "액젓", "조미료", "맛간장", "참기름", "들기름"]):
+    if any(x in ing for x in ["간장", "고추장", "된장", "소금", "설탕", "식초", "고춧가루", "후춧가루", "파우더", "가루", "허브", "바질", "파슬리", "시나몬", "머스타드", "소스", "액젓", "조미료", "맛간장", "참기름", "들기름", "맛술", "미림", "청주", "소주", "생강술"]):
         return "seasoning"
 
     # 지방/유제품
