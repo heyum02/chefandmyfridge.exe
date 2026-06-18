@@ -85,7 +85,8 @@ export default function CameraScreen() {
         const itemCategory = item.category || 'Unknown';
 
         const purchaseDate = item.base_date || formatDate(today);
-        const calculatedExpiry = calculateExpirationDate(item.name, itemCategory, purchaseDate);
+        const itemSubCategory = item.sub_category || 'default';
+        const calculatedExpiry = calculateExpirationDate(item.name, itemCategory, itemSubCategory, purchaseDate);
 
         const daysLeft = calculateDaysLeft(calculatedExpiry);
         return {
@@ -123,7 +124,7 @@ export default function CameraScreen() {
     updated[index][key] = value;
 
     if (key === 'category' && value !== 'Unknown') {
-      updated[index].expiryDate = calculateExpirationDate(updated[index].name, value, formatDate(new Date()));
+      updated[index].expiryDate = calculateExpirationDate(updated[index].name, value, 'default', formatDate(new Date()));
     }
     setAnalyzedResults(updated);
   };

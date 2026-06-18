@@ -7,8 +7,8 @@ import { SYSTEM_PROMPT, OUTPUT_GUIDE } from './prompts';
  * Expo 환경에서는 process.env.EXPO_PUBLIC_... 형식을 사용합니다.
  */
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-const API_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
+const API_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+//gemini-3.5-flash
 /**
  * 이미지를 Gemini API에 전송하여 식재료를 추출하는 함수
  * @param {string} imageUri - 분석할 이미지의 로컬 경로
