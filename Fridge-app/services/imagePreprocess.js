@@ -1,3 +1,5 @@
+// 이미지 전처리 서비스 모듈
+
 import * as ImageManipulator from 'expo-image-manipulator';
 
 export const preprocessImage = async (imageUri, isReceipt = false) => {

@@ -1,19 +1,18 @@
+//Gemini API를 사용하여 이미지에서 식재료를 추출하는 서비스 모듈
+
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system/legacy';
 import { SYSTEM_PROMPT, OUTPUT_GUIDE } from './prompts';
 
-/**
- * .env 파일에 정의된 API 키와 환경 변수를 가져옵니다.
- * Expo 환경에서는 process.env.EXPO_PUBLIC_... 형식을 사용합니다.
- */
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-const API_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
-//gemini-3.5-flash
+const API_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
 /**
  * 이미지를 Gemini API에 전송하여 식재료를 추출하는 함수
  * @param {string} imageUri - 분석할 이미지의 로컬 경로
  * @returns {Promise<Array>} - 추출된 식재료 객체 배열
  */
+
 export const analyzeIngredients = async (imageUris) => {
     try {
 
@@ -81,6 +80,35 @@ export const analyzeIngredients = async (imageUris) => {
 
     } catch (error) {
         console.error("Gemini 분석 에러 상세:", error.response ? error.response.data : error.message);
-        throw new Error("식재료를 분석하는 중 오류가 발생했습니다.");
+
+        let errorMessage = "식재료를 분석하는 중 오류가 발생했습니다.";
+
+        const status = error.response ? error.response.status : (error.status || null);
+        if (status) {
+            switch (status) {
+                case 400:
+                    errorMessage = "이미지를 인식할 수 없습니다. 다른 사진으로 다시 등록해주세요.";
+                    break;
+                case 403:
+                    errorMessage = "접근이 거부되었습니다. API 키를 확인해주세요.";
+                    break;
+                case 429:
+                    errorMessage = "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
+                    break;
+                case 500:
+                    errorMessage = "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+                    break;
+                case 503:
+                    errorMessage = "서비스가 일시적으로 이용 불가능합니다. 잠시 후 다시 시도해주세요.";
+                    break;
+                default:
+                    errorMessage = `알 수 없는 오류가 발생했습니다. (오류 코드: ${status})`;
+            }
+        }
+        else if (error.message && error.message.includes('Network Error')) {
+            errorMessage = "네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.";
+        }
+
+        throw new Error(errorMessage);
     }
 };

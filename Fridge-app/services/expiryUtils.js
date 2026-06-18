@@ -1,3 +1,5 @@
+// 소비기한 계산 유틸리티
+
 import expireData from './expireRules.json';
 
 export const formatDate = (date) => {
