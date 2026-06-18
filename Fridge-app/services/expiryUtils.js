@@ -1,4 +1,6 @@
-import { EXCEPTION_ITEMS, FREEZER_ITEMS, DEFAULT_STORAGE_DAYS } from './expireRules';
+// 소비기한 계산 유틸리티
+
+import expireData from './expireRules.json';
 
 export const formatDate = (date) => {
     const d = new Date(date);
@@ -18,18 +20,22 @@ export const calculateDaysLeft = (expiryDateStr) => {
     return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
 };
 
-export function calculateExpirationDate(name, category, baseDate) {
+export function calculateExpirationDate(name, category, sub_category, baseDate) {
     let storageDays = null;
 
-    const matchKey = Object.keys(EXCEPTION_ITEMS).find(key => name.includes(key));
+    const categoryGroup = expireData.DETAIL_GROUPS[category];
 
-    if (matchKey) {
-        storageDays = EXCEPTION_ITEMS[matchKey];
+    if (categoryGroup !== undefined) {
+        if (typeof categoryGroup === 'number') {
+            storageDays = categoryGroup;
+        }
+        else if (typeof categoryGroup === 'object') {
+            storageDays = categoryGroup[sub_category] ?? categoryGroup["default"];
+        }
     }
-    else if (name.includes("냉동") || FREEZER_ITEMS.some(item => name.includes(item))) {
-        storageDays = 180;
-    } else {
-        storageDays = DEFAULT_STORAGE_DAYS[category] ?? DEFAULT_STORAGE_DAYS["기타"];
+
+    if (storageDays === null || storageDays === undefined) {
+        storageDays = expireData.DETAIL_GROUPS["기타"] ?? 7;
     }
 
     const targetDate = new Date(baseDate);

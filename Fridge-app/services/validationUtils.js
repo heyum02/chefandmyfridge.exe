@@ -1,3 +1,5 @@
+//이미지가 분석된 결과를 검증하고, 필요한 경우 UNKNOWN 항목을 처리하는 유틸리티 함수
+
 export const checkVisionAnalysisResult = (index, result) => {
 
     if (!result || !Array.isArray(result) || result.length === 0) {
